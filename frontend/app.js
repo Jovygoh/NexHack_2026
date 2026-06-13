@@ -115,6 +115,7 @@ function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, c
 function handleFile(input) {
   if(!input.files[0]) return;
   const f = input.files[0];
+  selectedContractFile = f;
   document.getElementById('file-name').textContent = f.name;
   document.getElementById('file-size').textContent = (f.size/1024).toFixed(1)+' KB';
   document.getElementById('file-preview').classList.add('show');
@@ -124,19 +125,23 @@ function handleDrop(e) {
   e.preventDefault();
   document.getElementById('upload-zone').classList.remove('drag');
   const f = e.dataTransfer.files[0]; if(!f) return;
+  selectedContractFile = f;
   document.getElementById('file-name').textContent = f.name;
   document.getElementById('file-size').textContent = (f.size/1024).toFixed(1)+' KB';
   document.getElementById('file-preview').classList.add('show');
   document.getElementById('scan-btn').disabled = false;
 }
 function removeFile() {
-  document.getElementById('file-preview').classList.remove('show');
+    document.getElementById('file-preview').classList.remove('show');
   document.getElementById('scan-btn').disabled = true;
   document.getElementById('file-input').value='';
+  selectedContractFile = null;
 }
 function togglePill(el){el.classList.toggle('active')}
 
 const SCAN_HISTORY_KEY = 'contractsense.scanHistory';
+const API_BASE_URL = window.CONTRACTSENSE_API_URL || 'http://127.0.0.1:8000';
+let selectedContractFile = null;
 
 function getScanHistory() {
   try {
@@ -152,18 +157,72 @@ function saveScanToHistory(contract) {
   buildHistoryList();
 }
 
-function createDemoAnalysisForUpload() {
-  const demo = JSON.parse(JSON.stringify(CONTRACTS[0]));
+function createContractFromBackendAnalysis(analysis) {
   const now = new Date();
-  demo.id = now.getTime();
-  demo.filename = document.getElementById('file-name').textContent || 'Uploaded contract';
-  demo.company = 'Uploaded contract';
-  demo.date = now.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
-  demo.time = now.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
-  return demo;
+  const findings = analysis.findings || [];
+  return {
+    id: now.getTime(),
+    filename: analysis.file_name || document.getElementById('file-name').textContent || 'Uploaded contract',
+    company: 'Uploaded contract',
+    date: now.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }),
+    time: now.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' }),
+    status: analysis.risk_level === 'low' ? 'safe' : findings.some(f => ['high','critical'].includes(f.severity)) ? 'critical' : 'issues',
+    title: 'CONTRACT COMPLIANCE REPORT',
+    subtitle: `${analysis.summary} Risk score: ${analysis.risk_score}/100.`,
+    meta: [
+      `File: ${analysis.file_name || 'Uploaded contract'}`,
+      `Risk level: ${analysis.risk_level}`,
+      `Risk score: ${analysis.risk_score}/100`
+    ],
+    sig: ['ContractSense', 'Reviewer'],
+    sections: [
+      {
+        title: findings.length ? 'Flagged Clauses' : 'Scan Result',
+        clauses: findings.length
+          ? findings.map((finding, index) => ({
+              id: `${index + 1}.1`,
+              text: finding.excerpt || finding.title,
+              status: ['critical','high'].includes(finding.severity) ? 'bad' : 'warn',
+              issue: finding.title,
+              law: finding.category,
+              desc: finding.explanation,
+              suggestion: finding.recommendation
+            }))
+          : [
+              {
+                id: '1.1',
+                text: 'No hidden or risky clauses were detected by the backend rule set.',
+                status: 'ok'
+              }
+            ]
+      }
+    ]
+  };
+}
+
+async function analyzeSelectedContract() {
+  if(!selectedContractFile) throw new Error('Please choose a contract file first.');
+
+  const formData = new FormData();
+  formData.append('file', selectedContractFile);
+  formData.append('jurisdiction', 'Malaysia');
+  formData.append('language', 'en');
+
+  const response = await fetch(`${API_BASE_URL}/api/contracts/analyze`, {
+    method: 'POST',
+    body: formData
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if(!response.ok) {
+    throw new Error(data.detail || 'The contract could not be analyzed.');
+  }
+
+  return createContractFromBackendAnalysis(data);
 }
 
 function startScan() {
+  if(!selectedContractFile) return;
   const btn = document.getElementById('scan-btn');
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
@@ -178,12 +237,20 @@ function startScan() {
   },600);
 }
 
-function showResults() {
+async function showResults() {
+  const btn = document.getElementById('scan-btn');
+  const label = document.getElementById('progress-label');
+  let contract;
+  try {
+    contract = await analyzeSelectedContract();
+  } catch(error) {
+    label.textContent = error.message;
+    btn.disabled = false;
+    return;
+  }
+
   document.getElementById('upload-view').style.display='none';
   document.getElementById('progress-bar').classList.remove('show');
-  // Prototype only: reuse one prepared analysis shape for any uploaded file.
-  // In production this object should come from the backend analysis API.
-  const contract = createDemoAnalysisForUpload();
   document.getElementById('results-filename').textContent = contract.filename;
   document.getElementById('results-view').classList.add('show');
   renderContractPage(
@@ -213,6 +280,7 @@ function resetScanner() {
   document.getElementById('progress-fill').style.width='0%';
   document.getElementById('progress-label').textContent='';
   document.getElementById('file-input').value='';
+  selectedContractFile = null;
 }
 
 // ═══════════════════════════════════════════
