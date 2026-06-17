@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from app.models import ClauseFinding
+
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
 
@@ -16,19 +18,6 @@ class RiskRule:
     patterns: tuple[str, ...]
     explanation: str
     recommendation: str
-
-
-@dataclass
-class ClauseFinding:
-    id: str
-    category: str
-    title: str
-    severity: RiskLevel
-    confidence: float
-    excerpt: str
-    explanation: str
-    recommendation: str
-    line_number: int | None
 
 
 RISK_RULES: tuple[RiskRule, ...] = (

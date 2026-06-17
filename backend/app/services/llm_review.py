@@ -45,15 +45,32 @@ Return:
 3. Questions for legal/compliance team
 4. Recommended negotiation actions
 """.strip()
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> origin/main
     try:
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
         )
+<<<<<<< HEAD
         review_text = response.choices[0].message.content or "No response from LLM."
     except Exception as e:
         review_text = f"Error during LLM review: {str(e)}"
         return LlmReview(provider="openai", model=model, review=review_text)
     return LlmReview(provider="openai", model=model, review=review_text)
+=======
+        review_text = response.choices[0].message.content or ""
+        return LlmReview(provider="openai", model=model, review=review_text)
+    except Exception as exc:
+        # If the AI call fails (bad key, rate limit, network, etc.),
+        # don't crash the whole scan — fall back to rule-based findings only.
+        return LlmReview(
+            provider="openai",
+            model=model,
+            review=f"AI review unavailable: {exc}",
+        )
+>>>>>>> origin/main
