@@ -14,8 +14,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8000"
     )
     max_upload_mb: int = 15
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-4o-mini"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -14,6 +14,7 @@
     <button class="nav-btn active" onclick="goPage('home')">Home</button>
     <button class="nav-btn" onclick="goPage('scanner')">Scanner</button>
     <button class="nav-btn" onclick="goPage('history')">History</button>
+    <button class="nav-btn" onclick="goPage('database')">Database</button>
   </div>
 </nav>
 
@@ -171,6 +172,66 @@
             <button class="sug-btn apply" id="h-copy-btn">Copy suggestion</button>
             <button class="sug-btn skip">Dismiss</button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DATABASE ══ -->
+<div id="page-database" class="page">
+  <div class="database-wrap">
+    <div class="page-title">Reference Database</div>
+    <div class="page-sub">Upload Malaysian company laws and your internal company policies to compare contracts against.</div>
+    
+    <div class="database-grid">
+      <!-- Malaysian Law Section -->
+      <div class="db-card">
+        <div class="db-card-header">
+          <div class="db-card-icon" style="background:rgba(79,142,247,0.12)">📋</div>
+          <div>
+            <h3>Malaysian Laws Database</h3>
+            <p class="db-card-desc">Employment Act, PDPA, Companies Act, etc.</p>
+          </div>
+        </div>
+        
+        <div class="db-upload-zone" id="law-upload-zone"
+             ondragover="this.classList.add('drag');event.preventDefault()"
+             ondragleave="this.classList.remove('drag')"
+             ondrop="handleDbDrop(event, 'law')">
+          <input type="file" id="law-file-input" accept=".pdf,.docx,.doc,.txt,.md" onchange="handleDbFile(this, 'law')" style="display:none">
+          <div class="db-upload-icon">📤</div>
+          <p>Drag files here or <span class="browse-link" onclick="document.getElementById('law-file-input').click()">browse</span></p>
+          <div class="db-filetypes">PDF, DOCX, TXT, MD</div>
+        </div>
+
+        <div class="db-file-list" id="law-file-list">
+          <div class="db-empty-msg">No Malaysian law files imported yet.</div>
+        </div>
+      </div>
+
+      <!-- Company Policies Section -->
+      <div class="db-card">
+        <div class="db-card-header">
+          <div class="db-card-icon" style="background:rgba(123,95,255,0.12)">🏢</div>
+          <div>
+            <h3>Company Policy & Regulations</h3>
+            <p class="db-card-desc">HR handbook, code of conduct, operations policy.</p>
+          </div>
+        </div>
+        
+        <div class="db-upload-zone" id="policy-upload-zone"
+             ondragover="this.classList.add('drag');event.preventDefault()"
+             ondragleave="this.classList.remove('drag')"
+             ondrop="handleDbDrop(event, 'policy')">
+          <input type="file" id="policy-file-input" accept=".pdf,.docx,.doc,.txt,.md" onchange="handleDbFile(this, 'policy')" style="display:none">
+          <div class="db-upload-icon">📤</div>
+          <p>Drag files here or <span class="browse-link" onclick="document.getElementById('policy-file-input').click()">browse</span></p>
+          <div class="db-filetypes">PDF, DOCX, TXT, MD</div>
+        </div>
+
+        <div class="db-file-list" id="policy-file-list">
+          <div class="db-empty-msg">No company policy files imported yet.</div>
         </div>
       </div>
     </div>

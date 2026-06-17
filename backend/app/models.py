@@ -1,10 +1,7 @@
 from typing import Literal
-
 from pydantic import BaseModel, Field
 
-
 RiskLevel = Literal["low", "medium", "high", "critical"]
-
 
 class ClauseFinding(BaseModel):
     id: str
@@ -17,13 +14,11 @@ class ClauseFinding(BaseModel):
     recommendation: str
     line_number: int | None = None
 
-
 class LlmReview(BaseModel):
     provider: str
     model: str
     review: str
-
-
+    
 class ContractAnalysisResponse(BaseModel):
     file_name: str
     summary: str
@@ -31,3 +26,4 @@ class ContractAnalysisResponse(BaseModel):
     risk_level: RiskLevel
     findings: list[ClauseFinding]
     llm_review: LlmReview | None = None
+    contract_text: str | None = None
