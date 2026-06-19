@@ -16,6 +16,15 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
 .nav-btn:hover{color:var(--text);background:var(--surface3)}
 .nav-btn.active{background:var(--accent);color:#fff}
 
+/* Backend status indicator */
+.backend-status{display:flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);padding:6px 14px;border-radius:20px;cursor:pointer;transition:border-color 0.2s;user-select:none}
+.backend-status:hover{border-color:var(--border2)}
+.backend-status span{font-size:12px;font-weight:500;color:var(--text2)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.status-dot.checking{background:var(--amber);animation:pulse 1s infinite}
+.status-dot.online{background:var(--green)}
+.status-dot.offline{background:var(--red)}
+
 /* PAGES */
 .page{display:none;padding-top:70px;min-height:100vh}
 .page.active{display:block}
