@@ -14,7 +14,7 @@ from app.services.text_extraction import extract_text_from_upload
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+#app.mount("/static", StaticFiles(directory="static"), name="static")
 # CORS Setup
 app.add_middleware(
     CORSMiddleware,
