@@ -14,7 +14,7 @@ async function checkBackend() {
   label.textContent = 'Checking...';
 
   try {
-    const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    const res = await fetch(`${API_BASE_URL}/health`, { signal: AbortSignal.timeout(4000) });
     if (res.ok) {
       const data = await res.json();
       dot.className     = 'status-dot online';
@@ -320,7 +320,7 @@ async function startScan() {
     formData.append('jurisdiction', 'Malaysia');
     formData.append('language', 'English');
 
-    const response = await fetch(`${API_BASE}/api/contracts/analyze`, {
+    const response = await fetch(`${API_BASE_URL}/api/contracts/analyze`, {
       method: 'POST',
       body: formData,
     });
