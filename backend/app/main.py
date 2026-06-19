@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import os
 from pathlib import Path
 from typing import Literal
@@ -192,7 +191,7 @@ async def chat_endpoint(request: ChatRequest):
     )
     
     return {"reply": reply}
-=======
+    
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -260,4 +259,3 @@ async def analyze_contract(
         findings=findings,
         llm_review=llm_review,
     )
->>>>>>> origin/main
