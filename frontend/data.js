@@ -2,7 +2,7 @@
 // CONTRACT DATA — real text from the 5 PDFs
 // ═══════════════════════════════════════════
 const CONFIG = {
-  API_URL: "https://nexhack-2026.onrender.com"
+  API_URL: "http://127.0.0.1:8000"
 };
 const CONTRACTS = [
   {
