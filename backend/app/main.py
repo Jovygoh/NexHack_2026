@@ -16,10 +16,6 @@ settings = get_settings()
 app = FastAPI(title=settings.app_name)
 #app.mount("/static", StaticFiles(directory="static"), name="static")
 # Paste your production Vercel URL here
-origins = [
-    "http://localhost:3000", # For local testing
-    "https://your-frontend-project.vercel.app", # Your deployed frontend
-]
 
 # CORS Setup
 app.add_middleware(
