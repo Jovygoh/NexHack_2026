@@ -14,7 +14,10 @@
     <button class="nav-btn active" onclick="goPage('home')">Home</button>
     <button class="nav-btn" onclick="goPage('scanner')">Scanner</button>
     <button class="nav-btn" onclick="goPage('history')">History</button>
-    <button class="nav-btn" onclick="goPage('database')">Database</button>
+  </div>
+  <div class="backend-status" id="backend-status" onclick="checkBackend()">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-label">Checking...</span>
   </div>
 </nav>
 
