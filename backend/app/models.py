@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from typing import Literal
 from pydantic import BaseModel, Field
 
@@ -28,7 +27,7 @@ class ContractAnalysisResponse(BaseModel):
     findings: list[ClauseFinding]
     llm_review: LlmReview | None = None
     contract_text: str | None = None
-=======
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -62,4 +61,3 @@ class ContractAnalysisResponse(BaseModel):
     risk_level: RiskLevel
     findings: list[ClauseFinding]
     llm_review: LlmReview | None = None
->>>>>>> origin/main
