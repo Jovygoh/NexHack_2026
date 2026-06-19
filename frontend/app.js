@@ -473,7 +473,7 @@ function openHistoryDetail(id) {
 function closeHistoryDetail() {
   _activeContract = null;
   document.getElementById('history-detail').classList.remove('show');
-  activeContractObj = null;
+  //activeContractObj = null;
 }
 // ═══════════════════════════════════════════
 // REFERENCE DATABASE
