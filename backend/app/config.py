@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 15
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    database_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
