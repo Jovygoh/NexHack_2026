@@ -353,8 +353,9 @@ async function startScan() {
     const contract = mapApiResponseToContract(apiData, _selectedFile);
     _activeContract = contract;
 
-    // Save to history
+    // Save to history (and persist so it survives a refresh)
     SCAN_HISTORY.unshift(contract);
+    saveHistory();
     buildHistoryList();
 
     showResults(contract);
@@ -420,10 +421,38 @@ function resetScanner() {
 }
 
 // ═══════════════════════════════════════════
-// HISTORY — runtime store (session only)
-// Replace with localStorage / DB call for persistence
+// HISTORY — persisted in localStorage so it
+// survives page refreshes / new tabs.
+// Falls back to the demo CONTRACTS on first run.
 // ═══════════════════════════════════════════
-const SCAN_HISTORY = [...CONTRACTS]; // pre-load demo contracts from data.js
+const HISTORY_STORAGE_KEY = 'contractsense_scan_history_v1';
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('Could not read saved history, falling back to demo data:', err);
+  }
+  return [...CONTRACTS]; // first run / corrupted storage — pre-load demo contracts
+}
+
+function saveHistory() {
+  try {
+    // Keep storage from growing unbounded over many test scans
+    const MAX_ENTRIES = 100;
+    if (SCAN_HISTORY.length > MAX_ENTRIES) SCAN_HISTORY.length = MAX_ENTRIES;
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(SCAN_HISTORY));
+  } catch (err) {
+    // e.g. storage quota exceeded or disabled — scan still works, just won't persist
+    console.warn('Could not save scan history:', err);
+  }
+}
+
+const SCAN_HISTORY = loadHistory();
 
 function buildHistoryList(filter = 'all') {
   const body = document.getElementById('history-table-body');
