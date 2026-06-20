@@ -439,10 +439,14 @@ function loadHistory() {
     const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        console.log(`[ContractSense] Loaded ${parsed.length} history entries from localStorage.`);
+        return parsed;
+      }
     }
+    console.log('[ContractSense] No saved history found — loading demo contracts.');
   } catch (err) {
-    console.warn('Could not read saved history, falling back to demo data:', err);
+    console.warn('[ContractSense] Could not read saved history, falling back to demo data:', err);
   }
   return [...CONTRACTS]; // first run / corrupted storage — pre-load demo contracts
 }
@@ -453,9 +457,10 @@ function saveHistory() {
     const MAX_ENTRIES = 100;
     if (SCAN_HISTORY.length > MAX_ENTRIES) SCAN_HISTORY.length = MAX_ENTRIES;
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(SCAN_HISTORY));
+    console.log(`[ContractSense] Saved ${SCAN_HISTORY.length} history entries to localStorage.`);
   } catch (err) {
     // e.g. storage quota exceeded or disabled — scan still works, just won't persist
-    console.warn('Could not save scan history:', err);
+    console.warn('[ContractSense] Could not save scan history:', err);
   }
 }
 
