@@ -493,6 +493,25 @@ function closeHistoryDetail() {
 // ═══════════════════════════════════════════
 // AI CHAT
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
+// SIDEBAR TOGGLE — hide/show issues panel for a larger contract view
+// ═══════════════════════════════════════════
+function toggleSidebar(context) {
+  const btnLabelId = context === 'scanner' ? 'scanner-sidebar-toggle-label' : 'history-sidebar-toggle-label';
+  const btnId = context === 'scanner' ? 'scanner-sidebar-toggle' : 'history-sidebar-toggle';
+
+  const panel = document.querySelector(
+    context === 'scanner' ? '.results-layout .issues-panel' : '.hd-issues-panel'
+  );
+  const label = document.getElementById(btnLabelId);
+  const btn   = document.getElementById(btnId);
+  if (!panel) return;
+
+  const collapsed = panel.classList.toggle('collapsed');
+  if (btn) btn.classList.toggle('collapsed', collapsed);
+  if (label) label.textContent = collapsed ? 'Show panel' : 'Hide panel';
+}
+
 function toggleChat() { document.getElementById('chat-box').classList.toggle('open'); }
 function toggleBig()  { document.getElementById('chat-box').classList.toggle('big'); }
 
