@@ -401,6 +401,13 @@ function showResults(contract) {
     document.getElementById('copy-btn'),
   );
 
+  // Reset scroll so the document always opens at the top, like a real
+  // PDF viewer — without this, leftover scroll position from a previous
+  // scan makes the page appear to load mid-document.
+  const scannerPanel = document.getElementById('contract-page-content').closest('.contract-panel');
+  if (scannerPanel) scannerPanel.scrollTop = 0;
+  document.getElementById('issues-list').scrollTop = 0;
+
   // Show LLM review in suggestion box if available
   if (contract.llmReview) {
     document.getElementById('suggestion-text').textContent = contract.llmReview.review;
@@ -510,6 +517,13 @@ function openHistoryDetail(id) {
     document.getElementById('history-suggestion-text'),
     document.getElementById('h-copy-btn'),
   );
+
+  // Reset scroll so the document always opens at the top, like a real
+  // PDF viewer — without this, leftover scroll position from a previously
+  // viewed contract makes the new one appear to load mid-document.
+  const historyPanel = document.getElementById('history-page-content').closest('.history-contract-panel');
+  if (historyPanel) historyPanel.scrollTop = 0;
+  document.getElementById('history-issues-list').scrollTop = 0;
 
   document.getElementById('history-detail').classList.add('show');
 }
