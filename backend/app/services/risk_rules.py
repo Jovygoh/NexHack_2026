@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.models import ClauseFinding
+from app.services.clause_splitter import Section, split_into_sections
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
@@ -22,42 +23,22 @@ class RiskRule:
 
 RISK_RULES: tuple[RiskRule, ...] = (
     RiskRule(
-        id="placeholder-rule",
-        category="General",
-        title="Placeholder rule",
-        severity="low",
-        patterns=(
-            r"placeholder",
-        ),
-        explanation="Placeholder.",
-        recommendation="Replace with real rule.",
-    ),
-
-    RiskRule(
         id="material-term-changes",
         category="General",
         title="Material term changes",
         severity="medium",
-        patterns=(
-            r"material changes",
-            r"substantial modifications",
-        ),
+        patterns=(r"material changes", r"substantial modifications"),
         explanation="The contract may allow significant changes to its terms.",
         recommendation="Require written notice, mutual consent, and a right to terminate if material terms change.",
     ),
-
     RiskRule(
         id="hidden-fees",
         category="Fees and payment",
         title="Potential hidden fees or pass-through charges",
         severity="high",
         patterns=(
-            r"additional fees?",
-            r"administrative charges?",
-            r"pass[-\s]?through costs?",
-            r"fees .* subject to change",
-            r"extra charges?",
-            r"separate charges?",
+            r"additional fees?", r"administrative charges?", r"pass[-\s]?through costs?",
+            r"fees .* subject to change", r"extra charges?", r"separate charges?",
             r"pricing .* may be adjusted",
         ),
         explanation="The contract may allow extra charges beyond the headline price.",
@@ -69,12 +50,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Broad limitation or waiver of liability",
         severity="critical",
         patterns=(
-            r"not liable for .* indirect",
-            r"limitation of liability",
-            r"liability .* capped",
-            r"waive .* damages",
-            r"exclude .* damages",
-            r"disclaim .* liability",
+            r"not liable for .* indirect", r"limitation of liability", r"liability .* capped",
+            r"waive .* damages", r"exclude .* damages", r"disclaim .* liability",
             r"consequential damages",
         ),
         explanation="Liability may be excluded or capped too broadly for enterprise risk tolerance.",
@@ -86,12 +63,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Broad data use or transfer permission",
         severity="high",
         patterns=(
-            r"use .* data .* improve",
-            r"share .* data .* affiliates?",
-            r"transfer .* personal data",
-            r"process .* data .* analytics",
-            r"data .* third parties",
-            r"personal information .* affiliates?",
+            r"use .* data .* improve", r"share .* data .* affiliates?", r"transfer .* personal data",
+            r"process .* data .* analytics", r"data .* third parties", r"personal information .* affiliates?",
         ),
         explanation="The vendor may use, share, or transfer enterprise/customer data broadly.",
         recommendation="Limit data use to service delivery, require data processing terms, and define retention/deletion duties.",
@@ -102,10 +75,7 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Exclusive remedy restriction",
         severity="medium",
         patterns=(
-            r"sole and exclusive remedy",
-            r"exclusive remedy",
-            r"limited to .* remedy",
-            r"only remedy",
+            r"sole and exclusive remedy", r"exclusive remedy", r"limited to .* remedy", r"only remedy",
         ),
         explanation="Available remedies may be narrowed even when business harm is larger.",
         recommendation="Preserve injunctive relief, statutory rights, and remedies for severe breaches.",
@@ -116,48 +86,129 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Terms incorporated by external reference",
         severity="medium",
         patterns=(
-            r"incorporated by reference",
-            r"available at https?://",
-            r"as updated from time to time",
-            r"posted on .* website",
-            r"online terms?",
-            r"external terms?",
+            r"incorporated by reference", r"available at https?://", r"as updated from time to time",
+            r"posted on .* website", r"online terms?", r"external terms?",
         ),
         explanation="Important terms may live outside the uploaded contract and change later.",
         recommendation="Attach referenced terms as exhibits and freeze the applicable version at signature.",
+    ),
+    # --- NDA / confidentiality-specific rules ---
+    RiskRule(
+        id="overbroad-confidential-definition",
+        category="Confidentiality",
+        title="Overbroad definition of confidential information",
+        severity="high",
+        patterns=(
+            r"absolutely all information", r"in any form whatsoever", r"publicly available.{0,40}confidential",
+            r"regardless of (?:whether|how) (?:marked|disclosed)",
+        ),
+        explanation="Defining confidential information to include publicly available or independently developed information is overbroad and may be unenforceable.",
+        recommendation="Limit the definition to non-public information that is marked confidential or reasonably understood to be confidential, with standard carve-outs (public domain, independently developed, already known).",
+    ),
+    RiskRule(
+        id="indefinite-duration",
+        category="Duration",
+        title="Indefinite or permanent contractual obligation",
+        severity="high",
+        patterns=(
+            r"permanently and indefinitely", r"without any expiry date", r"perpetually binding",
+            r"remain.{0,20}permanently binding", r"no expiration",
+        ),
+        explanation="Obligations with no time limit are commercially unusual and may be struck down by courts as an unreasonable restraint.",
+        recommendation="Specify a fixed term (commonly 2-5 years for confidentiality) after which obligations lapse, unless renewed by agreement.",
+    ),
+    RiskRule(
+        id="no-legal-disclosure-carveout",
+        category="Compliance",
+        title="No carve-out for legally required disclosure",
+        severity="critical",
+        patterns=(
+            r"no exception shall apply", r"regardless of.{0,30}court order", r"required by law.{0,30}shall not apply",
+            r"including where disclosure is required by law",
+        ),
+        explanation="A clause that prohibits disclosure even when required by law, court order, or regulator is unenforceable and may expose a party to contempt of court if relied upon.",
+        recommendation="Add a standard carve-out permitting disclosure required by law or valid court/regulatory order, with prior notice to the other party where legally permitted.",
+    ),
+    RiskRule(
+        id="disproportionate-penalty",
+        category="Remedies",
+        title="Disproportionate liquidated damages clause",
+        severity="critical",
+        patterns=(
+            r"liquidated damages.{0,60}regardless of actual loss",
+            r"damages of no less than RM\s?[\d,]{4,}",
+            r"penalty of (?:RM|USD|\$)\s?[\d,]{4,}",
+        ),
+        explanation="A fixed damages amount unrelated to actual loss may be treated as an unenforceable penalty rather than a genuine pre-estimate of loss under contract law.",
+        recommendation="Tie liquidated damages to a reasonable pre-estimate of loss, or rely on general damages assessed by a court instead of a large fixed figure.",
     ),
 )
 
 
 def analyze_text(text: str) -> list[ClauseFinding]:
+    """
+    Splits the contract into its real numbered sections/clauses, then runs
+    every rule against each clause individually. Returns one ClauseFinding
+    per clause (status 'low' if no rule matched, otherwise the matched
+    rule's severity) so the full original structure can be reconstructed
+    by the frontend.
+    """
+    sections = split_into_sections(text)
     findings: list[ClauseFinding] = []
-    lines = text.splitlines() or [text]
 
-    for rule in RISK_RULES:
-        match = _find_rule_match(rule, lines)
-        if match is None:
-            continue
+    for section in sections:
+        for clause in section.clauses:
+            clean = " ".join(clause.text.split())
+            if not clean:
+                continue
 
-        line_number, excerpt, confidence = match
-        findings.append(
-            ClauseFinding(
-                id=rule.id,
-                category=rule.category,
-                title=rule.title,
-                severity=rule.severity,
-                confidence=confidence,
-                excerpt=excerpt,
-                explanation=rule.explanation,
-                recommendation=rule.recommendation,
-                line_number=line_number,
-            )
-        )
+            matched_rule, excerpt, confidence = _match_clause(clean)
+
+            if matched_rule:
+                findings.append(
+                    ClauseFinding(
+                        id=f"{matched_rule.id}-{clause.id}",
+                        category=section.title,
+                        title=matched_rule.title,
+                        severity=matched_rule.severity,
+                        confidence=confidence,
+                        excerpt=f"{clause.id} {clean}",
+                        explanation=matched_rule.explanation,
+                        recommendation=matched_rule.recommendation,
+                        line_number=None,
+                    )
+                )
+            else:
+                # No issue found — still emit a "low" finding so the clause
+                # appears in the reconstructed document as a clean/ok clause.
+                findings.append(
+                    ClauseFinding(
+                        id=f"clean-{clause.id}",
+                        category=section.title,
+                        title="No issues detected",
+                        severity="low",
+                        confidence=0.5,
+                        excerpt=f"{clause.id} {clean}",
+                        explanation="",
+                        recommendation="",
+                        line_number=None,
+                    )
+                )
 
     return findings
 
 
+def _match_clause(clean_line: str) -> tuple[RiskRule | None, str, float]:
+    for rule in RISK_RULES:
+        for pattern in rule.patterns:
+            match = re.search(pattern, clean_line, re.IGNORECASE)
+            if match:
+                return rule, _excerpt_around(clean_line, match.start(), match.end()), 0.82
+    return None, clean_line, 0.0
+
+
 def calculate_risk_score(findings: list[ClauseFinding]) -> int:
-    weights = {"low": 10, "medium": 18, "high": 28, "critical": 40}
+    weights = {"low": 0, "medium": 18, "high": 28, "critical": 40}
     score = sum(weights[finding.severity] for finding in findings)
     return min(score, 100)
 
@@ -172,29 +223,7 @@ def risk_level_from_score(score: int) -> RiskLevel:
     return "low"
 
 
-def _find_rule_match(rule: RiskRule, lines: list[str]) -> tuple[int | None, str, float] | None:
-    compiled = [re.compile(pattern, re.IGNORECASE) for pattern in rule.patterns]
-
-    for index, line in enumerate(lines, start=1):
-        clean_line = " ".join(line.split())
-        if not clean_line:
-            continue
-
-        for pattern in compiled:
-            match = pattern.search(clean_line)
-            if match:
-                return index, _excerpt_around(clean_line, match.start(), match.end()), 0.82
-
-    joined = " ".join(line.strip() for line in lines if line.strip())
-    for pattern in compiled:
-        match = pattern.search(joined)
-        if match:
-            return None, _excerpt_around(joined, match.start(), match.end()), 0.72
-
-    return None
-
-
-def _excerpt_around(text: str, start: int, end: int, radius: int = 160) -> str:
+def _excerpt_around(text: str, start: int, end: int, radius: int = 200) -> str:
     left = max(start - radius, 0)
     right = min(end + radius, len(text))
     prefix = "..." if left > 0 else ""
