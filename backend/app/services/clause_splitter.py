@@ -57,7 +57,7 @@ def split_into_sections(text: str) -> list[Section]:
     clause_matches = list(_CLAUSE_PATTERN.finditer(text))
 
     if not clause_matches or not _looks_like_real_clause_structure(text, clause_matches, header_matches):
-        return [Section(title="Contract", clauses=[Clause(id="1", text=text)])]
+        return [Section(title="", clauses=[Clause(id="1", text=text)])]
 
     # Build a lookup of section number -> title from header matches
     titles: dict[str, str] = {}
