@@ -45,14 +45,18 @@ def split_into_sections(text: str) -> list[Section]:
     each containing numbered sub-clauses (e.g. "1.1", "1.2").
 
     Falls back to a single section with the whole text as one clause
-    if no numbering pattern is detected (e.g. unstructured contracts).
+    if no numbering pattern is detected (e.g. unstructured contracts),
+    OR if the detected pattern looks unreliable — e.g. a non-contract
+    document (study notes, articles, reports) that happens to contain a
+    few numbers shaped like "1.1" (page refs, statute sections, citations)
+    but isn't actually structured as numbered contract clauses.
     """
     text = " ".join(text.split())  # normalise whitespace/newlines
 
     header_matches = list(_SECTION_HEADER_PATTERN.finditer(text))
     clause_matches = list(_CLAUSE_PATTERN.finditer(text))
 
-    if not clause_matches:
+    if not clause_matches or not _looks_like_real_clause_structure(text, clause_matches, header_matches):
         return [Section(title="Contract", clauses=[Clause(id="1", text=text)])]
 
     # Build a lookup of section number -> title from header matches
@@ -87,6 +91,48 @@ def split_into_sections(text: str) -> list[Section]:
         )
         for num in section_order
     ]
+
+
+def _looks_like_real_clause_structure(text: str, clause_matches: list, header_matches: list) -> bool:
+    """
+    Heuristic sanity check to avoid treating non-contract documents
+    (study notes, articles, reports with case citations / statute
+    references) as if they were structured contracts.
+
+    Requires:
+    - At least one real section header (e.g. "1. DEFINITION OF...")
+      Most genuine contracts have these; prose documents with stray
+      numbers usually don't.
+    - Section numbers in the detected clauses are mostly sequential and
+      start near 1, rather than scattered/inconsistent (a strong signal
+      of real clause numbering vs. coincidental number matches like
+      "60A" or "14B" from statute citations).
+    """
+    if not header_matches:
+        return False
+
+    section_nums = []
+    for m in clause_matches:
+        try:
+            section_nums.append(int(m.group("num").split(".")[0]))
+        except ValueError:
+            continue
+
+    if not section_nums:
+        return False
+
+    # Real contracts rarely jump straight to large section numbers without
+    # smaller ones appearing first/often. If the spread of distinct section
+    # numbers is very large relative to how many clause matches there are,
+    # it's more likely coincidental matches from an unstructured document.
+    distinct_sections = set(section_nums)
+    if len(distinct_sections) > len(clause_matches):
+        return False
+
+    if max(distinct_sections) > 25:
+        return False
+
+    return True
 
 
 def flatten_clauses(sections: list[Section]) -> list[Clause]:
