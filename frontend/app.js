@@ -86,9 +86,9 @@ function renderContractPage(contract, containerEl, issueListEl, chipOk, chipWarn
         ? `<span class="${hlClass}"
              onclick="pickIssue('${c.id}','${containerEl.id}','${issueListEl.id}','${suggestionTextEl.id}','${copyBtn.id}')"
              title="${(c.issue||'').replace(/'/g,"&#39;")}">
-             ${c.id} ${c.text}
+             ${c.text}
            </span>`
-        : `<span>${c.id} ${c.text}</span>`;
+        : `<span>${c.text}</span>`;
       html += `<div class="clause-line" id="${containerEl.id}-clause-${safeId}">${inner}</div>`;
     });
   });
@@ -194,13 +194,18 @@ function mapApiResponseToContract(apiResponse, file) {
   });
 
   // Build sections from grouped findings, using the REAL clause id
-  // (e.g. "1.1", "2.3") extracted from the start of each excerpt,
-  // instead of a fake sequential counter.
+  // (e.g. "1.1", "2.3") extracted from the start of each excerpt when present.
+  // For documents with no numbered-clause structure (e.g. plain prose,
+  // study notes, unstructured text), fall back to a clean internal counter —
+  // never the raw backend rule id (e.g. "broad-liability-waiver-1"), which
+  // is meant for tracking only and should never appear in the UI.
+  let fallbackCounter = 0;
   const sections = categoryOrder.map(category => ({
     title: category,
     clauses: findingMap[category].map(f => {
       const idMatch = f.excerpt.match(/^(\d{1,2}\.\d{1,2})\s+/);
-      const realId   = idMatch ? idMatch[1] : f.id;
+      fallbackCounter++;
+      const realId   = idMatch ? idMatch[1] : `c${fallbackCounter}`;
       const cleanText = idMatch ? f.excerpt.slice(idMatch[0].length) : f.excerpt;
       return {
         id:         realId,
@@ -364,8 +369,9 @@ async function startScan() {
     _activeContract = contract;
     _chatHistory = []; // fresh conversation context for this contract
 
-    // Save to history
+    // Save to history (persisted to localStorage so it survives refresh)
     SCAN_HISTORY.unshift(contract);
+    saveScanHistory();
     buildHistoryList();
 
     showResults(contract);
@@ -434,10 +440,35 @@ function resetScanner() {
 }
 
 // ═══════════════════════════════════════════
-// HISTORY — runtime store (session only)
-// Replace with localStorage / DB call for persistence
+// HISTORY — persisted in localStorage so scans survive page refresh
 // ═══════════════════════════════════════════
-const SCAN_HISTORY = [...CONTRACTS]; // pre-load demo contracts from data.js
+const HISTORY_STORAGE_KEY = 'contractsense_scan_history_v1';
+
+function loadScanHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved) && saved.length > 0) return saved;
+    }
+  } catch (e) {
+    console.error('Failed to load scan history from localStorage:', e);
+  }
+  // First-ever visit (or corrupted storage) — seed with the demo contracts
+  return [...CONTRACTS];
+}
+
+function saveScanHistory() {
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(SCAN_HISTORY));
+  } catch (e) {
+    // Storage can fail if quota is exceeded (very large contracts/history) —
+    // don't crash the app, just warn in console.
+    console.error('Failed to save scan history to localStorage:', e);
+  }
+}
+
+let SCAN_HISTORY = loadScanHistory();
 
 function buildHistoryList(filter = 'all') {
   const body = document.getElementById('history-table-body');
@@ -459,6 +490,13 @@ function filterHistory(btn, filter) {
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   buildHistoryList(filter);
+}
+
+function clearScanHistory() {
+  if (!confirm('Clear all scan history? This cannot be undone.')) return;
+  SCAN_HISTORY = [];
+  saveScanHistory();
+  buildHistoryList();
 }
 
 function openHistoryDetail(id) {
