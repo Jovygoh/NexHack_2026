@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // CONFIG — change this to your backend URL
 // ═══════════════════════════════════════════
-const API_BASE = 'https://nexhack-2026.onrender.com';
+const API_BASE = 'http://127.0.0.1:8000';
 
 // ═══════════════════════════════════════════
 // BACKEND STATUS CHECKER
@@ -259,6 +259,13 @@ function severityToStatus(severity) {
   return 'ok';
 }
 
+// Detects when the backend's "reply" text is actually a raw error message
+// (e.g. OpenAI quota/billing errors, missing API key) so the UI can show
+// a short, friendly message instead of dumping the full error text.
+function isAiErrorText(text) {
+  return /^(error|ai capabilities are not available|openai client library)/i.test((text || '').trim());
+}
+
 // ═══════════════════════════════════════════
 // SCANNER — FILE UPLOAD
 // ═══════════════════════════════════════════
@@ -406,7 +413,10 @@ function showResults(contract) {
 
   // Show LLM review in suggestion box if available
   if (contract.llmReview) {
-    document.getElementById('suggestion-text').textContent = contract.llmReview.review;
+    const reviewText = contract.llmReview.review || '';
+    document.getElementById('suggestion-text').textContent = isAiErrorText(reviewText)
+      ? 'Error. Please try again.'
+      : reviewText;
   }
 }
 
@@ -564,14 +574,20 @@ async function sendMsg() {
     const data = await res.json();
     const reply = data.reply || 'No response received.';
 
-    document.getElementById(typingId).querySelector('.msg-bubble').textContent = reply;
+    // The backend can return a long raw error string as a normal reply
+    // (e.g. OpenAI quota/billing errors) — catch that case too and show
+    // a short, friendly message instead of dumping the full error.
+    const displayReply = isAiErrorText(reply) ? 'Error. Please try again.' : reply;
 
-    _chatHistory.push({ role: 'user', content: val });
-    _chatHistory.push({ role: 'assistant', content: reply });
+    document.getElementById(typingId).querySelector('.msg-bubble').textContent = displayReply;
+
+    if (!isAiErrorText(reply)) {
+      _chatHistory.push({ role: 'user', content: val });
+      _chatHistory.push({ role: 'assistant', content: reply });
+    }
 
   } catch (err) {
-    document.getElementById(typingId).querySelector('.msg-bubble').textContent =
-      `Couldn't reach the AI assistant: ${err.message}`;
+    document.getElementById(typingId).querySelector('.msg-bubble').textContent = 'Error. Please try again.';
     console.error('Chat failed:', err);
   }
 
