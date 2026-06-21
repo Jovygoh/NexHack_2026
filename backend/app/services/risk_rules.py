@@ -38,8 +38,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         severity="high",
         patterns=(
             r"additional fees?", r"administrative charges?", r"pass[-\s]?through costs?",
-            r"fees .{0,40} subject to change", r"extra charges?", r"separate charges?",
-            r"pricing .{0,40} may be adjusted",
+            r"fees .* subject to change", r"extra charges?", r"separate charges?",
+            r"pricing .* may be adjusted",
         ),
         explanation="The contract may allow extra charges beyond the headline price.",
         recommendation="List all charge categories, caps, approval requirements, and invoice dispute rights.",
@@ -50,8 +50,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Broad limitation or waiver of liability",
         severity="critical",
         patterns=(
-            r"not liable for .{0,40} indirect", r"limitation of liability", r"liability .{0,40} capped",
-            r"waive .{0,40} damages", r"exclude .{0,40} damages", r"disclaim .{0,40} liability",
+            r"not liable for .* indirect", r"limitation of liability", r"liability .* capped",
+            r"waive .* damages", r"exclude .* damages", r"disclaim .* liability",
             r"consequential damages",
         ),
         explanation="Liability may be excluded or capped too broadly for enterprise risk tolerance.",
@@ -63,8 +63,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Broad data use or transfer permission",
         severity="high",
         patterns=(
-            r"use .{0,40} data .{0,40} improve", r"share .{0,40} data .{0,40} affiliates?", r"transfer .{0,40} personal data",
-            r"process .{0,40} data .{0,40} analytics", r"data .{0,40} third parties", r"personal information .{0,40} affiliates?",
+            r"use .* data .* improve", r"share .* data .* affiliates?", r"transfer .* personal data",
+            r"process .* data .* analytics", r"data .* third parties", r"personal information .* affiliates?",
         ),
         explanation="The vendor may use, share, or transfer enterprise/customer data broadly.",
         recommendation="Limit data use to service delivery, require data processing terms, and define retention/deletion duties.",
@@ -75,7 +75,7 @@ RISK_RULES: tuple[RiskRule, ...] = (
         title="Exclusive remedy restriction",
         severity="medium",
         patterns=(
-            r"sole and exclusive remedy", r"exclusive remedy", r"limited to .{0,40} remedy", r"only remedy",
+            r"sole and exclusive remedy", r"exclusive remedy", r"limited to .* remedy", r"only remedy",
         ),
         explanation="Available remedies may be narrowed even when business harm is larger.",
         recommendation="Preserve injunctive relief, statutory rights, and remedies for severe breaches.",
@@ -87,7 +87,7 @@ RISK_RULES: tuple[RiskRule, ...] = (
         severity="medium",
         patterns=(
             r"incorporated by reference", r"available at https?://", r"as updated from time to time",
-            r"posted on .{0,40} website", r"online terms?", r"external terms?",
+            r"posted on .* website", r"online terms?", r"external terms?",
         ),
         explanation="Important terms may live outside the uploaded contract and change later.",
         recommendation="Attach referenced terms as exhibits and freeze the applicable version at signature.",
@@ -173,7 +173,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         title=matched_rule.title,
                         severity=matched_rule.severity,
                         confidence=confidence,
-                        excerpt=f"{clause.id} {clean}".strip(),
+                        excerpt=f"{clause.id} {clean}",
                         explanation=matched_rule.explanation,
                         recommendation=matched_rule.recommendation,
                         line_number=None,
@@ -189,7 +189,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         title="No issues detected",
                         severity="low",
                         confidence=0.5,
-                        excerpt=f"{clause.id} {clean}".strip(),
+                        excerpt=f"{clause.id} {clean}",
                         explanation="",
                         recommendation="",
                         line_number=None,
@@ -230,3 +230,4 @@ def _excerpt_around(text: str, start: int, end: int, radius: int = 200) -> str:
     prefix = "..." if left > 0 else ""
     suffix = "..." if right < len(text) else ""
     return f"{prefix}{text[left:right]}{suffix}"
+
