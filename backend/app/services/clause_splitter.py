@@ -64,40 +64,13 @@ def split_into_sections(text: str) -> list[Section]:
     for h in header_matches:
         titles[h.group("num")] = h.group("title").strip().rstrip(".")
 
-    header_starts = sorted(h.start() for h in header_matches)
-
     sections: dict[str, list[Clause]] = {}
     section_order: list[str] = []
-
-    # Preserve any preamble text before the first numbered clause (e.g. a
-    # document title or recital paragraph) instead of silently dropping it.
-    preamble_end = clause_matches[0].start()
-    # Don't include the section-1 header itself in the preamble — only
-    # genuine preamble text that comes before it, if any.
-    for h_start in header_starts:
-        if h_start < preamble_end:
-            preamble_end = h_start
-            break
-    preamble_text = text[:preamble_end].strip()
-    if preamble_text:
-        sections["0"] = [Clause(id="", text=preamble_text)]
-        section_order.append("0")
 
     for i, match in enumerate(clause_matches):
         clause_id = match.group("num")
         start = match.end()
         end = clause_matches[i + 1].start() if i + 1 < len(clause_matches) else len(text)
-
-        # If a section header (e.g. "2. OBLIGATIONS") falls inside this
-        # clause's range, it means the next section started here without
-        # being immediately followed by a sub-clause match — trim the
-        # clause text at that point so the header doesn't bleed into the
-        # previous clause's text.
-        for h_start in header_starts:
-            if start < h_start < end:
-                end = h_start
-                break
-
         clause_text = text[start:end].strip()
 
         if not clause_text:
@@ -113,7 +86,7 @@ def split_into_sections(text: str) -> list[Section]:
 
     return [
         Section(
-            title="" if num == "0" else f"{num}. {titles.get(num, 'Section ' + num)}",
+            title=f"{num}. {titles.get(num, 'Section ' + num)}",
             clauses=sections[num],
         )
         for num in section_order
@@ -165,3 +138,4 @@ def _looks_like_real_clause_structure(text: str, clause_matches: list, header_ma
 def flatten_clauses(sections: list[Section]) -> list[Clause]:
     """Convenience helper: returns every clause across all sections as a flat list."""
     return [clause for section in sections for clause in section.clauses]
+
