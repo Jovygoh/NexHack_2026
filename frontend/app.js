@@ -538,15 +538,11 @@ async function sendMsg() {
   msgs.innerHTML += `<div class="msg ai" id="${typingId}"><div class="msg-avatar">🤖</div><div class="msg-bubble">Thinking…</div></div>`;
   msgs.scrollTop = msgs.scrollHeight;
 
-  // Build context from whichever contract is currently open (scanner result or history)
+  // Build context from whichever contract is currently open (scanner result or history).
+  // If no contract is loaded, send empty context — the AI can still answer
+  // general Malaysian law questions from its own knowledge.
   const contractText = _activeContract?.rawText || '';
   const rawFindings  = _activeContract?.apiFindings || [];
-
-  if (!contractText) {
-    msgs.innerHTML += `<div class="msg ai"><div class="msg-avatar">🤖</div><div class="msg-bubble">This is a sample/demo contract without a real scan behind it, so I don't have its full text to discuss. Try asking about a contract you've actually scanned!</div></div>`;
-    msgs.scrollTop = msgs.scrollHeight;
-    return;
-  }
 
   try {
     const res = await fetch(`${API_BASE}/api/chat`, {
