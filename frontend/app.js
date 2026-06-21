@@ -66,19 +66,21 @@ function renderContractPage(contract, containerEl, issueListEl, chipOk, chipWarn
   chipWarn.textContent = `⚠ ${warn} warn`;
   chipBad.textContent  = `✕ ${bad} critical`;
 
-  // Build contract page HTML
-  let html = `
-    <div class="doc-title">${contract.title}</div>
-    <div class="doc-subtitle">${contract.subtitle}</div>
-    <hr>
-    <div class="doc-meta">
+  // Build contract page HTML — only show header rows that have real content,
+  // so when the document has no extractable title/meta, nothing fake or
+  // empty is displayed. This keeps the view to just the real document text.
+  let html = '';
+  if (contract.title) html += `<div class="doc-title">${contract.title}</div>`;
+  if (contract.subtitle) html += `<div class="doc-subtitle">${contract.subtitle}</div>`;
+  if (contract.title || contract.subtitle) html += `<hr>`;
+  if (contract.meta && contract.meta.length) {
+    html += `<div class="doc-meta">
       ${contract.meta.map(m => `<strong>${m.split(':')[0]}:</strong>${m.substring(m.indexOf(':')+1)}<br>`).join('')}
-    </div>
-    <hr>
-  `;
+    </div><hr>`;
+  }
 
   contract.sections.forEach(sec => {
-    html += `<div class="sec-title">${sec.title}</div>`;
+    if (sec.title) html += `<div class="sec-title">${sec.title}</div>`;
     sec.clauses.forEach(c => {
       const hlClass = c.status === 'bad' ? 'hl-red' : c.status === 'warn' ? 'hl-amber' : '';
       const safeId  = c.id.replace(/\./g, '_');
@@ -239,6 +241,13 @@ function mapApiResponseToContract(apiResponse, file) {
     ? 'issues'
     : 'safe';
 
+  // Derive the document title from the document's OWN text — never from
+  // the uploaded filename. Many real documents open with a heading line
+  // (e.g. "NON-DISCLOSURE AGREEMENT", "EMPLOYMENT CONTRACT"); use that if
+  // it looks like a real title. Otherwise, don't fabricate one.
+  const rawText = apiResponse.contract_text || '';
+  const extractedTitle = extractDocumentTitle(rawText);
+
   return {
     id:       Date.now(),
     filename: apiResponse.file_name || file.name,
@@ -246,16 +255,30 @@ function mapApiResponseToContract(apiResponse, file) {
     date,
     time,
     status:   overallStatus,
-    title:    (file.name || 'Contract').replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ').toUpperCase(),
-    subtitle: `Risk score: ${apiResponse.risk_score}/100 · ${apiResponse.risk_level.toUpperCase()}`,
-    meta:     [`File: ${apiResponse.file_name}`, `Scanned: ${date} ${time}`, `Summary: ${apiResponse.summary}`],
+    title:    extractedTitle, // may be '' — renderer hides the title row when empty
+    subtitle: '',
+    meta:     [], // no fabricated File/Scanned/Summary header — just the real document
     sig:      ['Authorised Signatory', 'Authorised Signatory'],
     sections,
     llmReview: apiResponse.llm_review || null,
     // Kept for the AI chat — sends the full contract + raw findings as context
-    rawText:     apiResponse.contract_text || '',
+    rawText,
     apiFindings: apiResponse.findings || [],
   };
+}
+
+// Pulls a plausible title from the start of the real document text.
+// Looks for a short, mostly-uppercase first line/sentence (typical of
+// document headings like "EMPLOYMENT CONTRACT" or "NON-DISCLOSURE
+// AGREEMENT"). Returns '' if nothing reasonable is found — callers should
+// not fabricate a fallback from the filename.
+function extractDocumentTitle(text) {
+  if (!text) return '';
+  const firstChunk = text.trim().slice(0, 200);
+  // Try to grab the first run of words before a long lowercase sentence starts
+  const match = firstChunk.match(/^([A-Z][A-Z0-9 ,&'\-]{4,60})(?=[A-Z][a-z]|\s\d|$)/);
+  if (match) return match[1].trim();
+  return '';
 }
 
 function severityToStatus(severity) {
