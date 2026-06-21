@@ -157,6 +157,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
     findings: list[ClauseFinding] = []
 
     for section in sections:
+        section_label = section.title or "General"
         for clause in section.clauses:
             clean = " ".join(clause.text.split())
             if not clean:
@@ -168,7 +169,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                 findings.append(
                     ClauseFinding(
                         id=f"{matched_rule.id}-{clause.id}",
-                        category=section.title,
+                        category=section_label,
                         title=matched_rule.title,
                         severity=matched_rule.severity,
                         confidence=confidence,
@@ -184,7 +185,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                 findings.append(
                     ClauseFinding(
                         id=f"clean-{clause.id}",
-                        category=section.title,
+                        category=section_label,
                         title="No issues detected",
                         severity="low",
                         confidence=0.5,
