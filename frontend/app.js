@@ -130,6 +130,182 @@ function renderContractPage(contract, containerEl, issueListEl, chipOk, chipWarn
   }).join('');
 }
 
+// ═══════════════════════════════════════════
+// TRUE PDF RENDERING — renders the actual uploaded
+// file pixel-for-pixel via pdf.js (same wording, same
+// layout, same alignment as the original), with highlight
+// overlays positioned over the real text layer instead of
+// reconstructing the document from extracted text.
+// Only available right after a live scan, in the same
+// browser session — the original file bytes aren't persisted
+// to History, so revisiting later falls back to the
+// reconstructed view (see renderContractPage above).
+// ═══════════════════════════════════════════
+async function renderPdfWithHighlights(contract, containerEl, issueListEl, chipOk, chipWarn, chipBad, suggestionTextEl, copyBtn) {
+  if (!window.pdfjsLib) return false;
+
+  const findings = contract.apiFindings || [];
+  const flagged  = findings.filter(f => f.severity !== 'low');
+  const okCount  = findings.length - flagged.length;
+  const warnCount = flagged.filter(f => f.severity === 'medium').length;
+  const badCount  = flagged.filter(f => f.severity === 'high' || f.severity === 'critical').length;
+
+  chipOk.textContent   = `✓ ${okCount}`;
+  chipWarn.textContent = `⚠ ${warnCount}`;
+  chipBad.textContent  = `✕ ${badCount}`;
+
+  containerEl.innerHTML = '';
+
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument(contract.pdfUrl).promise;
+  } catch (err) {
+    console.warn('[ContractSense] pdf.js could not load the file, falling back to reconstructed view:', err);
+    return false;
+  }
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    let page, viewport, textContent;
+    try {
+      page = await pdf.getPage(pageNum);
+      viewport = page.getViewport({ scale: 1.3 });
+      textContent = await page.getTextContent();
+    } catch (err) {
+      console.warn(`[ContractSense] Could not load page ${pageNum}:`, err);
+      continue;
+    }
+
+    const pageDiv = document.createElement('div');
+    pageDiv.className = 'pdf-page';
+    pageDiv.style.width  = `${viewport.width}px`;
+    pageDiv.style.height = `${viewport.height}px`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = viewport.width;
+    canvas.height = viewport.height;
+    pageDiv.appendChild(canvas);
+
+    try {
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    } catch (err) {
+      console.warn(`[ContractSense] Could not render page ${pageNum} canvas:`, err);
+    }
+
+    const textLayerDiv = document.createElement('div');
+    textLayerDiv.className = 'pdf-text-layer';
+    textLayerDiv.style.width  = `${viewport.width}px`;
+    textLayerDiv.style.height = `${viewport.height}px`;
+    textLayerDiv.style.setProperty('--scale-factor', viewport.scale.toString());
+    pageDiv.appendChild(textLayerDiv);
+
+    containerEl.appendChild(pageDiv);
+
+    const textDivs = [];
+    try {
+      await pdfjsLib.renderTextLayer({
+        textContentSource: textContent,
+        container: textLayerDiv,
+        viewport,
+        textDivs,
+      }).promise;
+    } catch (err) {
+      console.warn(`[ContractSense] Could not render text layer for page ${pageNum}:`, err);
+      continue;
+    }
+
+    // Build a searchable joined string for this page, with an index map
+    // back to which text item each character range belongs to, so a
+    // matched excerpt can be traced back to the actual rendered spans.
+    let joined = '';
+    const itemStarts = [];
+    textContent.items.forEach(item => {
+      itemStarts.push(joined.length);
+      joined += item.str + ' ';
+    });
+    const joinedLower = joined.toLowerCase();
+
+    flagged.forEach(f => {
+      const needle = (f.excerpt || '').replace(/^\d{1,2}\.\d{1,2}\s+/, '').trim();
+      if (!needle) return;
+
+      let matchStart = -1, matchLen = 0;
+      for (const len of [needle.length, 150, 100, 60, 30]) {
+        const probe = needle.slice(0, len).trim();
+        if (probe.length < 15) continue;
+        const idx = joinedLower.indexOf(probe.toLowerCase());
+        if (idx !== -1) { matchStart = idx; matchLen = probe.length; break; }
+      }
+      if (matchStart === -1) return; // not found on this page — try silently, no crash
+
+      const matchEnd = matchStart + matchLen;
+      const cls = (f.severity === 'high' || f.severity === 'critical') ? 'pdf-highlight-bad' : 'pdf-highlight-warn';
+
+      textContent.items.forEach((item, i) => {
+        const start = itemStarts[i];
+        const end = start + item.str.length;
+        if (end > matchStart && start < matchEnd) {
+          const div = textDivs[i];
+          if (!div) return;
+          div.classList.add(cls);
+          div.dataset.findingId = f.id;
+          div.addEventListener('click', () => pickIssuePdf(f.id, issueListEl.id, suggestionTextEl.id, copyBtn.id));
+        }
+      });
+    });
+  }
+
+  issueListEl.innerHTML = flagged.map(f => {
+    const statusClass = (f.severity === 'high' || f.severity === 'critical') ? 'bad' : 'warn';
+    const descSnippet = (f.explanation || '').substring(0, 90);
+    return `
+      <div class="issue-item" id="${issueListEl.id}-issue-${f.id}"
+        onclick="pickIssuePdf('${f.id}','${issueListEl.id}','${suggestionTextEl.id}','${copyBtn.id}')">
+        <div class="issue-top">
+          <div class="issue-badge ${statusClass}">!</div>
+          <div class="issue-name">${f.title || ''}</div>
+        </div>
+        <div class="issue-desc">${descSnippet}${descSnippet.length >= 90 ? '…' : ''}</div>
+      </div>
+    `;
+  }).join('');
+
+  return true;
+}
+
+function pickIssuePdf(findingId, issueListElId, suggestionTextElId, copyBtnId) {
+  const findings = (_activeContract && _activeContract.apiFindings) || [];
+  const finding = findings.find(f => f.id === findingId);
+  if (!finding) return;
+
+  document.querySelectorAll('.pdf-highlight-bad, .pdf-highlight-warn').forEach(el => {
+    el.style.outline = 'none';
+  });
+  document.querySelectorAll(`[data-finding-id="${CSS.escape(findingId)}"]`).forEach((el, i) => {
+    el.style.outline = '2px solid var(--accent)';
+    el.style.outlineOffset = '1px';
+    if (i === 0) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  const issueList = document.getElementById(issueListElId);
+  if (issueList) {
+    issueList.querySelectorAll('.issue-item').forEach(el => el.classList.remove('active'));
+    const issueEl = document.getElementById(`${issueListElId}-issue-${findingId}`);
+    if (issueEl) { issueEl.classList.add('active'); issueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  }
+
+  const sEl = document.getElementById(suggestionTextElId);
+  if (sEl) sEl.textContent = finding.recommendation || 'No suggestion available.';
+
+  const btn = document.getElementById(copyBtnId);
+  if (btn && finding.recommendation) {
+    btn.onclick = () => {
+      navigator.clipboard.writeText(finding.recommendation).catch(() => {});
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy suggestion', 2000);
+    };
+  }
+}
+
 function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, copyBtnId) {
   // Search active contract (scanner or history)
   const allClauses = _activeContract
@@ -264,6 +440,12 @@ function mapApiResponseToContract(apiResponse, file) {
     // Kept for the AI chat — sends the full contract + raw findings as context
     rawText,
     apiFindings: apiResponse.findings || [],
+    // Real PDF bytes, kept in memory only for this session — lets the
+    // viewer render the actual uploaded file (exact wording/layout/
+    // alignment) instead of a reconstructed approximation. Not persisted
+    // to History (blob URLs don't survive a refresh), so revisiting this
+    // scan later falls back to the reconstructed view.
+    pdfUrl: (file && file.type === 'application/pdf') ? URL.createObjectURL(file) : null,
   };
 }
 
@@ -397,7 +579,7 @@ async function startScan() {
     saveScanHistory();
     buildHistoryList();
 
-    showResults(contract);
+    await showResults(contract);
 
   } catch (err) {
     clearInterval(progressTimer);
@@ -409,7 +591,7 @@ async function startScan() {
   }
 }
 
-function showResults(contract) {
+async function showResults(contract) {
   document.getElementById('upload-view').style.display = 'none';
   document.getElementById('progress-bar').classList.remove('show');
   document.getElementById('progress-fill').style.background = '';
@@ -429,16 +611,55 @@ function showResults(contract) {
   document.getElementById('s-chip-warn').textContent = `⚠ ${allC.filter(c=>c.status==='warn').length} warn`;
   document.getElementById('s-chip-bad').textContent  = `✕ ${allC.filter(c=>c.status==='bad').length} critical`;
 
-  renderContractPage(
-    contract,
-    document.getElementById('contract-page-content'),
-    document.getElementById('issues-list'),
-    document.getElementById('chip-ok'),
-    document.getElementById('chip-warn'),
-    document.getElementById('chip-bad'),
-    document.getElementById('suggestion-text'),
-    document.getElementById('copy-btn'),
-  );
+  const reconstructedEl = document.getElementById('contract-page-content');
+  const pdfViewEl        = document.getElementById('pdf-true-view');
+  const fallbackNoticeEl = document.getElementById('pdf-fallback-notice');
+
+  let usedTruePdf = false;
+  if (contract.pdfUrl && window.pdfjsLib) {
+    try {
+      usedTruePdf = await renderPdfWithHighlights(
+        contract,
+        pdfViewEl,
+        document.getElementById('issues-list'),
+        document.getElementById('chip-ok'),
+        document.getElementById('chip-warn'),
+        document.getElementById('chip-bad'),
+        document.getElementById('suggestion-text'),
+        document.getElementById('copy-btn'),
+      );
+    } catch (err) {
+      console.warn('[ContractSense] True PDF render failed, falling back:', err);
+      usedTruePdf = false;
+    }
+  }
+
+  if (usedTruePdf) {
+    pdfViewEl.style.display = 'flex';
+    reconstructedEl.style.display = 'none';
+    fallbackNoticeEl.style.display = 'none';
+  } else {
+    pdfViewEl.style.display = 'none';
+    reconstructedEl.style.display = '';
+    fallbackNoticeEl.style.display = contract.pdfUrl ? 'none' : 'block';
+    renderContractPage(
+      contract,
+      reconstructedEl,
+      document.getElementById('issues-list'),
+      document.getElementById('chip-ok'),
+      document.getElementById('chip-warn'),
+      document.getElementById('chip-bad'),
+      document.getElementById('suggestion-text'),
+      document.getElementById('copy-btn'),
+    );
+  }
+
+  // Reset scroll so the document always opens at the top, like a real
+  // PDF viewer — without this, leftover scroll position from a previous
+  // scan makes the page appear to load mid-document.
+  const scannerPanel = reconstructedEl.closest('.contract-panel');
+  if (scannerPanel) scannerPanel.scrollTop = 0;
+  document.getElementById('issues-list').scrollTop = 0;
 
   // Show LLM review in suggestion box if available
   if (contract.llmReview) {
@@ -450,6 +671,9 @@ function showResults(contract) {
 }
 
 function resetScanner() {
+  if (_activeContract && _activeContract.pdfUrl) {
+    URL.revokeObjectURL(_activeContract.pdfUrl);
+  }
   _activeContract = null;
   _selectedFile   = null;
   document.getElementById('results-view').classList.remove('show');
@@ -460,6 +684,7 @@ function resetScanner() {
   document.getElementById('progress-fill').style.width = '0%';
   document.getElementById('progress-label').textContent = '';
   document.getElementById('file-input').value = '';
+  document.getElementById('pdf-true-view').innerHTML = '';
 }
 
 // ═══════════════════════════════════════════
@@ -483,7 +708,17 @@ function loadScanHistory() {
 
 function saveScanHistory() {
   try {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(SCAN_HISTORY));
+    // pdfUrl is a blob: URL tied to this browser session — it becomes
+    // invalid the moment the page reloads, so don't persist it as if it
+    // were still usable. History items always fall back to the
+    // reconstructed text view, which is fine since it's a faithful
+    // re-derivation either way.
+    const serializable = SCAN_HISTORY.map(c => {
+      if (!c.pdfUrl) return c;
+      const { pdfUrl, ...rest } = c;
+      return rest;
+    });
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(serializable));
   } catch (e) {
     // Storage can fail if quota is exceeded (very large contracts/history) —
     // don't crash the app, just warn in console.
@@ -522,7 +757,7 @@ function clearScanHistory() {
   buildHistoryList();
 }
 
-function openHistoryDetail(id) {
+async function openHistoryDetail(id) {
   const contract = SCAN_HISTORY.find(c => c.id === id);
   if (!contract) return;
 
@@ -547,16 +782,56 @@ function openHistoryDetail(id) {
     <div class="chip bad">✕ ${bad} critical</div>
   `;
 
-  renderContractPage(
-    contract,
-    document.getElementById('history-page-content'),
-    document.getElementById('history-issues-list'),
-    document.getElementById('hd-chips').children[0],
-    document.getElementById('hd-chips').children[1],
-    document.getElementById('hd-chips').children[2],
-    document.getElementById('history-suggestion-text'),
-    document.getElementById('h-copy-btn'),
-  );
+  const reconstructedEl = document.getElementById('history-page-content');
+  const pdfViewEl        = document.getElementById('hd-pdf-true-view');
+  const fallbackNoticeEl = document.getElementById('hd-pdf-fallback-notice');
+
+  let usedTruePdf = false;
+  if (contract.pdfUrl && window.pdfjsLib) {
+    try {
+      usedTruePdf = await renderPdfWithHighlights(
+        contract,
+        pdfViewEl,
+        document.getElementById('history-issues-list'),
+        document.getElementById('hd-chips').children[0],
+        document.getElementById('hd-chips').children[1],
+        document.getElementById('hd-chips').children[2],
+        document.getElementById('history-suggestion-text'),
+        document.getElementById('h-copy-btn'),
+      );
+    } catch (err) {
+      console.warn('[ContractSense] True PDF render failed for history item, falling back:', err);
+      usedTruePdf = false;
+    }
+  }
+
+  if (usedTruePdf) {
+    pdfViewEl.style.display = 'flex';
+    reconstructedEl.style.display = 'none';
+    fallbackNoticeEl.style.display = 'none';
+  } else {
+    pdfViewEl.style.display = 'none';
+    reconstructedEl.style.display = '';
+    fallbackNoticeEl.style.display = 'block';
+    renderContractPage(
+      contract,
+      reconstructedEl,
+      document.getElementById('history-issues-list'),
+      document.getElementById('hd-chips').children[0],
+      document.getElementById('hd-chips').children[1],
+      document.getElementById('hd-chips').children[2],
+      document.getElementById('history-suggestion-text'),
+      document.getElementById('h-copy-btn'),
+    );
+  }
+
+  // Reset scroll so the document always opens at the top, like a real
+  // PDF viewer — without this, leftover scroll position from a
+  // previously viewed contract makes the new one appear to load
+  // mid-document.
+  const historyPanel = reconstructedEl.closest('.history-contract-panel');
+  if (historyPanel) historyPanel.scrollTop = 0;
+  document.getElementById('history-issues-list').scrollTop = 0;
 
   document.getElementById('history-detail').classList.add('show');
 }
