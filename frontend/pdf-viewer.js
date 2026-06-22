@@ -10,7 +10,7 @@
 
 if (window['pdfjsLib']) {
   pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js';
 }
 
 const PDF_RENDER_SCALE = 1.4; // canvas resolution multiplier for crisp text

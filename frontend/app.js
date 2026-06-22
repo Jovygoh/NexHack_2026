@@ -1,7 +1,5 @@
-// ═══════════════════════════════════════════
-// CONFIG — change this to your backend URL
-// ═══════════════════════════════════════════
-const API_BASE = 'https://nexhack-2026.onrender.com';
+let API_BASE = 'https://nexhack-2026.onrender.com';
+const HOSTED_API = 'https://nexhack-2026.onrender.com';
 
 // ═══════════════════════════════════════════
 // BACKEND STATUS CHECKER
@@ -13,26 +11,29 @@ async function checkBackend() {
   dot.className   = 'status-dot checking';
   label.textContent = 'Checking...';
 
-  try {
-    const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(4000) });
-    if (res.ok) {
-      const data = await res.json();
-      dot.className     = 'status-dot online';
-      label.textContent = 'Backend online';
-    } else {
-      throw new Error(`HTTP ${res.status}`);
-    }
-  } catch (err) {
-    dot.className     = 'status-dot offline';
-    // Give a helpful reason
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      label.textContent = 'Backend timeout';
-    } else if (err.message.includes('fetch')) {
-      label.textContent = 'Backend offline';
-    } else {
-      label.textContent = `Error: ${err.message}`;
+  const targets = [];
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname) {
+    targets.push('http://127.0.0.1:8000');
+  }
+  targets.push(HOSTED_API);
+
+  for (const url of targets) {
+    try {
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        API_BASE = url;
+        dot.className     = 'status-dot online';
+        label.textContent = `Backend online (${url.includes('127.0.0.1') || url.includes('localhost') ? 'Local' : 'Cloud'})`;
+        return;
+      }
+    } catch (err) {
+      // Continue to check other targets
     }
   }
+
+  API_BASE = targets[0];
+  dot.className     = 'status-dot offline';
+  label.textContent = 'Backend offline';
 }
 
 // Check on load, then every 15 seconds

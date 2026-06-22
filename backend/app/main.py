@@ -92,6 +92,8 @@ async def analyze_contract(
     llm_review = await review_with_llm(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
+        gemini_api_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_model,
         contract_text=contract_text,
         findings=findings,
         jurisdiction=jurisdiction,
@@ -230,6 +232,8 @@ async def chat_endpoint(request: ChatRequest):
     reply = await chat_with_llm(
         api_key=settings.openai_api_key,
         model=settings.openai_model,
+        gemini_api_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_model,
         message=request.message,
         contract_text=request.contract_text,
         findings=request.findings,
