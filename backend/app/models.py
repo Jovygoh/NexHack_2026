@@ -18,7 +18,20 @@ class LlmReview(BaseModel):
     provider: str
     model: str
     review: str
-    
+
+class PageSize(BaseModel):
+    width: float
+    height: float
+
+class HighlightBoxOut(BaseModel):
+    finding_id: str       # links back to ClauseFinding.id
+    page: int             # 0-indexed
+    x0: float
+    x1: float
+    top: float
+    bottom: float
+    severity: RiskLevel
+
 class ContractAnalysisResponse(BaseModel):
     file_name: str
     summary: str
@@ -27,4 +40,10 @@ class ContractAnalysisResponse(BaseModel):
     findings: list[ClauseFinding]
     llm_review: LlmReview | None = None
     contract_text: str | None = None
-
+    # PDF-native rendering data — present only when the upload was a PDF
+    # that pdfplumber could parse. Frontend uses these to render the real
+    # PDF pages via PDF.js and overlay highlight boxes at exact coordinates,
+    # instead of reconstructing the document as HTML text.
+    pdf_base64: str | None = None
+    page_sizes: list[PageSize] | None = None
+    highlight_boxes: list[HighlightBoxOut] | None = None
