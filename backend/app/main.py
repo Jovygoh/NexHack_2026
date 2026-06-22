@@ -1,3 +1,4 @@
+import base64
 import os
 from pathlib import Path
 from typing import Literal
@@ -6,11 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from app.config import get_settings
-from app.models import ContractAnalysisResponse, ClauseFinding
+from app.models import ContractAnalysisResponse, ClauseFinding, PageSize, HighlightBoxOut
 from app.services.llm_review import review_with_llm
 from app.services.llm_chat import chat_with_llm
 from app.services.risk_rules import analyze_text, calculate_risk_score, risk_level_from_score
-from app.services.text_extraction import extract_text_from_upload
+from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
+from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
@@ -72,13 +74,15 @@ async def analyze_contract(
     jurisdiction: str | None = Form(default=None),
     language: str | None = Form(default=None),
 ) -> ContractAnalysisResponse:
-    contract_text = await extract_text_from_upload(file, settings.max_upload_mb)
+    content, extension = await read_and_validate_upload(file, settings.max_upload_mb)
+    contract_text = extract_text_from_bytes(content, extension)
+
     if not contract_text.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Could not extract readable text from the uploaded contract.",
         )
-    
+
     # Load uploaded reference databases
     laws_text = _load_reference_text(LAWS_DIR)
     policies_text = _load_reference_text(POLICIES_DIR)
@@ -101,6 +105,45 @@ async def analyze_contract(
         if findings
         else "No hidden/risky clauses were detected by the current rule set."
     )
+
+    # PDF-native rendering data: only built for PDF uploads. Renders the
+    # REAL PDF in the browser (via PDF.js) with highlight boxes drawn at
+    # exact coordinates, instead of reconstructing the document as HTML.
+    pdf_base64 = None
+    page_sizes_out = None
+    highlight_boxes_out = None
+
+    if extension == ".pdf":
+        try:
+            extraction = extract_pdf_with_coords(content)
+            pdf_base64 = base64.b64encode(content).decode("ascii")
+            page_sizes_out = [PageSize(width=w, height=h) for (w, h) in extraction.page_sizes]
+
+            boxes: list[HighlightBoxOut] = []
+            # Only flagged (non-"low") findings need highlighting — clean
+            # clauses don't need a box drawn on the real PDF.
+            for finding in findings:
+                if finding.severity == "low":
+                    continue
+                matched = match_excerpt_to_boxes(extraction, finding.excerpt, finding.severity)
+                for box in matched:
+                    boxes.append(HighlightBoxOut(
+                        finding_id=finding.id,
+                        page=box.page,
+                        x0=box.x0,
+                        x1=box.x1,
+                        top=box.top,
+                        bottom=box.bottom,
+                        severity=box.severity,
+                    ))
+            highlight_boxes_out = boxes
+        except Exception as e:
+            # If coordinate extraction fails for any reason (malformed PDF,
+            # scanned/image-only PDF with no extractable words, etc.), fall
+            # back gracefully — the scan still completes with text-based
+            # results, just without PDF-native highlighting.
+            print(f"PDF coordinate extraction failed: {e}")
+
     return ContractAnalysisResponse(
         file_name=file.filename or "uploaded-contract",
         summary=summary,
@@ -109,6 +152,9 @@ async def analyze_contract(
         findings=findings,
         llm_review=llm_review,
         contract_text=contract_text,
+        pdf_base64=pdf_base64,
+        page_sizes=page_sizes_out,
+        highlight_boxes=highlight_boxes_out,
     )
 
 @app.get("/api/reference/files")
