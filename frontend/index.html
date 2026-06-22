@@ -8,6 +8,7 @@
 <meta http-equiv="Expires" content="0">
 <title>ContractSense</title>
 <link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
 
@@ -103,12 +104,11 @@
           <button class="btn-ghost" style="padding:6px 14px;font-size:12px" onclick="resetScanner()">← New scan</button>
         </div>
       </div>
-      <div class="contract-page-wrap">
-        <div class="contract-page" id="contract-page-content"></div>
-        <div class="pdf-true-view" id="pdf-true-view" style="display:none"></div>
-      </div>
-      <div class="pdf-fallback-notice" id="pdf-fallback-notice" style="display:none">
-        Showing a reconstructed text view — the original file's exact layout isn't available for this item.
+      <div class="contract-page-wrap" id="contract-page-wrap">
+        <div class="pdf-viewer" id="pdf-viewer"></div>
+        <!-- Fallback for non-PDF uploads (txt/docx) where PDF-native
+             rendering isn't available — keeps working as plain text. -->
+        <div class="contract-page" id="contract-page-content" style="display:none"></div>
       </div>
     </div>
     <div class="issues-panel">
@@ -176,12 +176,9 @@
       </button>
     </div>
     <div class="history-detail-body">
-      <div class="history-contract-panel">
-        <div class="contract-page" id="history-page-content"></div>
-        <div class="pdf-true-view" id="hd-pdf-true-view" style="display:none"></div>
-      </div>
-      <div class="pdf-fallback-notice" id="hd-pdf-fallback-notice" style="display:none">
-        Showing a reconstructed text view — the original file's exact layout isn't available for this item.
+      <div class="history-contract-panel" id="history-contract-panel">
+        <div class="pdf-viewer" id="history-pdf-viewer"></div>
+        <div class="contract-page" id="history-page-content" style="display:none"></div>
       </div>
       <div class="hd-issues-panel">
         <div class="issues-header">
@@ -224,13 +221,8 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-  if (window['pdfjsLib']) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-</script>
 <script src="data.js?v=20260620a"></script>
+<script src="pdf-viewer.js?v=20260620a"></script>
 <script src="app.js?v=20260620a"></script>
 </body>
 </html>
