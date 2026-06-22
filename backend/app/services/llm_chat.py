@@ -120,7 +120,23 @@ def offline_fallback_chat(
 
     message_lower = message.lower()
     
-    # 1. Search contract findings
+    # 1. Translate raw developer errors to friendly alerts
+    friendly_err = ""
+    if error:
+        err_str = str(error).lower()
+        if "insufficient_quota" in err_str or "429" in err_str or "quota" in err_str:
+            friendly_err = (
+                "your OpenAI API key has exceeded its current quota or your billing plan is inactive. "
+                "Please check your card or plan details on the OpenAI API platform."
+            )
+        elif "api_key" in err_str or "invalid" in err_str or "401" in err_str:
+            friendly_err = (
+                "your API key is invalid or not configured correctly in the backend `.env` file."
+            )
+        else:
+            friendly_err = f"an API connection error occurred: {error}"
+
+    # 2. Search contract findings
     matched_findings = []
     for f in findings:
         title_words = set(re.findall(r'\w+', f.title.lower()))
@@ -130,7 +146,7 @@ def offline_fallback_chat(
             if any(word in message_lower for word in ['liability', 'fee', 'charge', 'term', 'renewal', 'remedy', 'privacy', 'data', 'confidential', f.title.lower()]):
                 matched_findings.append(f)
                 
-    # 2. Search reference texts
+    # 3. Search reference texts
     law_info = []
     if laws_text:
         paragraphs = laws_text.split('\n\n')
@@ -140,7 +156,7 @@ def offline_fallback_chat(
                 if any(qw in p.lower() for qw in query_words):
                     law_info.append(p[:300].strip() + ("..." if len(p) > 300 else ""))
 
-    # 3. Malaysian Law Heuristics
+    # 4. Malaysian Law Heuristics
     malaysian_law_highlights = []
     if any(w in message_lower for w in ['employ', 'hour', 'overtime', 'ot', 'leave', 'maternity', 'paternity', 'notice', 'probation', 'salary', 'wages', 'rest day', 'holiday', 'terminat']):
         malaysian_law_highlights.append(
@@ -166,37 +182,47 @@ def offline_fallback_chat(
             "- **Company Secretary**: A qualified, licensed company secretary must be appointed within 30 days of incorporation."
         )
 
-    # Compile the final answer
-    err_text = f" ({error})" if error else ""
+    # 5. Compile the final answer
     res = [
-        "### ⚠️ ContractSense AI (Offline Fallback Mode)\n"
-        f"I am currently operating in offline fallback mode because the cloud AI service is unavailable{err_text}. "
-        "Here is the local information extracted from your scanned contract and Malaysian legal reference databases:\n"
+        "### ⚠️ AI Chat (Offline Fallback Mode)\n"
     ]
     
-    if matched_findings:
-        res.append("#### 🔍 Matched Findings from Scanned Contract:")
-        for mf in matched_findings[:3]:
-            res.append(f"- **{mf.title}** ({mf.severity.upper()}): {mf.explanation}\n  *Recommended remediation*: {mf.recommendation}")
-        res.append("")
-        
-    if law_info:
-        res.append("#### 📄 Matching Reference Database Excerpts:")
-        for li in law_info[:2]:
-            res.append(f"> {li}")
-        res.append("")
-        
-    if malaysian_law_highlights:
-        res.append("#### ⚖️ Relevant Malaysian Law Reference Guides:")
-        res.extend(malaysian_law_highlights)
+    if friendly_err:
+        res.append(f"**API Status Alert**: The cloud AI service is currently offline because {friendly_err}\n")
+    else:
+        res.append("**API Status Alert**: The cloud AI service is offline (missing API key configuration).\n")
+
+    # If the user asks a question that doesn't match any local templates (like Family Law)
+    is_general_query = not matched_findings and not law_info and not malaysian_law_highlights
     
-    if not matched_findings and not law_info and not malaysian_law_highlights:
+    if is_general_query:
         res.append(
-            "#### 💡 How can I help?\n"
-            "You can ask me questions about:\n"
-            "- **Employment terms**: working hours, overtime pay (OT), maternity/paternity leave, and termination notice.\n"
-            "- **PDPA 2010**: data processing consent, security rules, and third-party data transfer.\n"
-            "- **Companies Act 2016**: director duties, audit rules, and incorporation."
+            "#### 💡 Why is this happening?\n"
+            "Normally, ContractSense AI is a full artificial intelligence prepared to **answer any general questions** (including Family Law, child protection, corporate advice, or any legal topic you type).\n\n"
+            "However, because the system is currently blocked from reaching the cloud AI (due to the quota/API key issue mentioned above), I am running in local fallback mode. In this mode, I can only search for keywords in your scanned contract and basic Malaysian company law databases.\n\n"
+            "**How to fix this:**\n"
+            "- Please check the billing status on your OpenAI platform dashboard, or\n"
+            "- Configure a valid `OPENAI_API_KEY` or `GEMINI_API_KEY` in the backend `.env` file.\n\n"
+            "Once the API key is active, you will be able to ask the AI **any question** you want without limitations!"
         )
-        
+    else:
+        res.append(
+            "I have searched the scanned contract and local reference databases for matches to your query:\n"
+        )
+        if matched_findings:
+            res.append("#### 🔍 Matched Findings from Scanned Contract:")
+            for mf in matched_findings[:3]:
+                res.append(f"- **{mf.title}** ({mf.severity.upper()}): {mf.explanation}\n  *Recommended remediation*: {mf.recommendation}")
+            res.append("")
+            
+        if law_info:
+            res.append("#### 📄 Matching Reference Database Excerpts:")
+            for li in law_info[:2]:
+                res.append(f"> {li}")
+            res.append("")
+            
+        if malaysian_law_highlights:
+            res.append("#### ⚖️ Relevant Malaysian Law Reference Guides:")
+            res.extend(malaysian_law_highlights)
+            
     return "\n".join(res)

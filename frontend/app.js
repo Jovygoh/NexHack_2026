@@ -832,7 +832,7 @@ async function sendMsg() {
     // a short, friendly message instead of dumping the full error.
     const displayReply = isAiErrorText(reply) ? 'Error. Please try again.' : reply;
 
-    document.getElementById(typingId).querySelector('.msg-bubble').textContent = displayReply;
+    document.getElementById(typingId).querySelector('.msg-bubble').innerHTML = renderMarkdown(displayReply);
 
     if (!isAiErrorText(reply)) {
       _chatHistory.push({ role: 'user', content: val });
@@ -840,7 +840,7 @@ async function sendMsg() {
     }
 
   } catch (err) {
-    document.getElementById(typingId).querySelector('.msg-bubble').textContent = 'Error. Please try again.';
+    document.getElementById(typingId).querySelector('.msg-bubble').innerHTML = 'Error. Please try again.';
     console.error('Chat failed:', err);
   }
 
@@ -895,10 +895,67 @@ function makeResizable(dividerId, panelClass) {
   });
 }
 
-// Initialize resize handlers after DOM load
+function makeDraggable(el) {
+  if (!el) return;
+  let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+  let hasMoved = false;
+
+  el.addEventListener('mousedown', dragMouseDown);
+
+  function dragMouseDown(e) {
+    e = e || window.event;
+    if (e.button !== 0) return;
+    pos3 = e.clientX;
+    pos4 = e.clientY;
+    hasMoved = false;
+    document.addEventListener('mouseup', closeDragElement);
+    document.addEventListener('mousemove', elementDrag);
+    e.preventDefault();
+  }
+
+  function elementDrag(e) {
+    e = e || window.event;
+    pos1 = pos3 - e.clientX;
+    pos2 = pos4 - e.clientY;
+    pos3 = e.clientX;
+    pos4 = e.clientY;
+    
+    const newTop = el.offsetTop - pos2;
+    const newLeft = el.offsetLeft - pos1;
+    
+    const padding = 10;
+    const maxTop = window.innerHeight - el.offsetHeight - padding;
+    const maxLeft = window.innerWidth - el.offsetWidth - padding;
+    
+    el.style.top = `${Math.max(padding, Math.min(newTop, maxTop))}px`;
+    el.style.left = `${Math.max(padding, Math.min(newLeft, maxLeft))}px`;
+    el.style.bottom = 'auto';
+    el.style.right = 'auto';
+    
+    if (Math.abs(pos1) > 2 || Math.abs(pos2) > 2) {
+      hasMoved = true;
+    }
+  }
+
+  function closeDragElement() {
+    document.removeEventListener('mouseup', closeDragElement);
+    document.removeEventListener('mousemove', elementDrag);
+  }
+
+  el.addEventListener('click', (e) => {
+    if (hasMoved) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      hasMoved = false;
+    }
+  }, { capture: true });
+}
+
+// Initialize resize & drag handlers after DOM load
 window.addEventListener('DOMContentLoaded', () => {
   makeResizable('scanner-resize-divider', '.issues-panel');
   makeResizable('history-resize-divider', '.hd-issues-panel');
+  makeDraggable(document.querySelector('.chat-fab'));
 });
 
 // ═══════════════════════════════════════════
