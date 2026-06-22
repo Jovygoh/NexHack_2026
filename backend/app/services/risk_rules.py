@@ -1,233 +1,141 @@
+"""
+Splits extracted contract text back into numbered clauses.
+
+PDF text extraction often loses original line breaks, so a clause like:
+  "1.1 Confidential Information means..."
+  "1.2 The Receiving Party agrees..."
+ends up as one continuous run-on string. This module re-splits that text
+using the numbering pattern (e.g. "1.1", "2.3", "10.4") so the rest of the
+pipeline can work clause-by-clause instead of treating the whole contract
+as a single blob.
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
-
-from app.models import ClauseFinding
-from app.services.clause_splitter import Section, split_into_sections
-
-RiskLevel = Literal["low", "medium", "high", "critical"]
 
 
-@dataclass(frozen=True)
-class RiskRule:
-    id: str
-    category: str
-    title: str
-    severity: RiskLevel
-    patterns: tuple[str, ...]
-    explanation: str
-    recommendation: str
+# Matches clause numbers like "1.1", "2.3", "10.4" at a word boundary,
+# followed by a space and then text. Also matches top-level section
+# headers like "1. DEFINITION OF..." (no decimal).
+_CLAUSE_PATTERN = re.compile(
+    r"(?<![\d.])(?P<num>\d{1,2}\.\d{1,2})\.?\s+(?=[A-Z'])"
+)
 
-
-RISK_RULES: tuple[RiskRule, ...] = (
-    RiskRule(
-        id="material-term-changes",
-        category="General",
-        title="Material term changes",
-        severity="medium",
-        patterns=(r"material changes", r"substantial modifications"),
-        explanation="The contract may allow significant changes to its terms.",
-        recommendation="Require written notice, mutual consent, and a right to terminate if material terms change.",
-    ),
-    RiskRule(
-        id="hidden-fees",
-        category="Fees and payment",
-        title="Potential hidden fees or pass-through charges",
-        severity="high",
-        patterns=(
-            r"additional fees?", r"administrative charges?", r"pass[-\s]?through costs?",
-            r"fees .* subject to change", r"extra charges?", r"separate charges?",
-            r"pricing .* may be adjusted",
-        ),
-        explanation="The contract may allow extra charges beyond the headline price.",
-        recommendation="List all charge categories, caps, approval requirements, and invoice dispute rights.",
-    ),
-    RiskRule(
-        id="broad-liability-waiver",
-        category="Liability",
-        title="Broad limitation or waiver of liability",
-        severity="critical",
-        patterns=(
-            r"not liable for .* indirect", r"limitation of liability", r"liability .* capped",
-            r"waive .* damages", r"exclude .* damages", r"disclaim .* liability",
-            r"consequential damages",
-        ),
-        explanation="Liability may be excluded or capped too broadly for enterprise risk tolerance.",
-        recommendation="Carve out fraud, confidentiality, data breach, IP infringement, and gross negligence.",
-    ),
-    RiskRule(
-        id="data-use",
-        category="Data and privacy",
-        title="Broad data use or transfer permission",
-        severity="high",
-        patterns=(
-            r"use .* data .* improve", r"share .* data .* affiliates?", r"transfer .* personal data",
-            r"process .* data .* analytics", r"data .* third parties", r"personal information .* affiliates?",
-        ),
-        explanation="The vendor may use, share, or transfer enterprise/customer data broadly.",
-        recommendation="Limit data use to service delivery, require data processing terms, and define retention/deletion duties.",
-    ),
-    RiskRule(
-        id="exclusive-remedy",
-        category="Remedies",
-        title="Exclusive remedy restriction",
-        severity="medium",
-        patterns=(
-            r"sole and exclusive remedy", r"exclusive remedy", r"limited to .* remedy", r"only remedy",
-        ),
-        explanation="Available remedies may be narrowed even when business harm is larger.",
-        recommendation="Preserve injunctive relief, statutory rights, and remedies for severe breaches.",
-    ),
-    RiskRule(
-        id="ambiguous-incorporation",
-        category="Referenced documents",
-        title="Terms incorporated by external reference",
-        severity="medium",
-        patterns=(
-            r"incorporated by reference", r"available at https?://", r"as updated from time to time",
-            r"posted on .* website", r"online terms?", r"external terms?",
-        ),
-        explanation="Important terms may live outside the uploaded contract and change later.",
-        recommendation="Attach referenced terms as exhibits and freeze the applicable version at signature.",
-    ),
-    # --- NDA / confidentiality-specific rules ---
-    RiskRule(
-        id="overbroad-confidential-definition",
-        category="Confidentiality",
-        title="Overbroad definition of confidential information",
-        severity="high",
-        patterns=(
-            r"absolutely all information", r"in any form whatsoever", r"publicly available.{0,40}confidential",
-            r"regardless of (?:whether|how) (?:marked|disclosed)",
-        ),
-        explanation="Defining confidential information to include publicly available or independently developed information is overbroad and may be unenforceable.",
-        recommendation="Limit the definition to non-public information that is marked confidential or reasonably understood to be confidential, with standard carve-outs (public domain, independently developed, already known).",
-    ),
-    RiskRule(
-        id="indefinite-duration",
-        category="Duration",
-        title="Indefinite or permanent contractual obligation",
-        severity="high",
-        patterns=(
-            r"permanently and indefinitely", r"without any expiry date", r"perpetually binding",
-            r"remain.{0,20}permanently binding", r"no expiration",
-        ),
-        explanation="Obligations with no time limit are commercially unusual and may be struck down by courts as an unreasonable restraint.",
-        recommendation="Specify a fixed term (commonly 2-5 years for confidentiality) after which obligations lapse, unless renewed by agreement.",
-    ),
-    RiskRule(
-        id="no-legal-disclosure-carveout",
-        category="Compliance",
-        title="No carve-out for legally required disclosure",
-        severity="critical",
-        patterns=(
-            r"no exception shall apply", r"regardless of.{0,30}court order", r"required by law.{0,30}shall not apply",
-            r"including where disclosure is required by law",
-        ),
-        explanation="A clause that prohibits disclosure even when required by law, court order, or regulator is unenforceable and may expose a party to contempt of court if relied upon.",
-        recommendation="Add a standard carve-out permitting disclosure required by law or valid court/regulatory order, with prior notice to the other party where legally permitted.",
-    ),
-    RiskRule(
-        id="disproportionate-penalty",
-        category="Remedies",
-        title="Disproportionate liquidated damages clause",
-        severity="critical",
-        patterns=(
-            r"liquidated damages.{0,60}regardless of actual loss",
-            r"damages of no less than RM\s?[\d,]{4,}",
-            r"penalty of (?:RM|USD|\$)\s?[\d,]{4,}",
-        ),
-        explanation="A fixed damages amount unrelated to actual loss may be treated as an unenforceable penalty rather than a genuine pre-estimate of loss under contract law.",
-        recommendation="Tie liquidated damages to a reasonable pre-estimate of loss, or rely on general damages assessed by a court instead of a large fixed figure.",
-    ),
+_SECTION_HEADER_PATTERN = re.compile(
+    r"(?<![\d.])(?P<num>\d{1,2})\.\s+(?P<title>[A-Z][A-Z\s\-]{2,60}?)(?=\s+\d{1,2}\.\d{1,2}\s|\s+\d{1,2}\.\s|$)"
 )
 
 
-def analyze_text(text: str) -> list[ClauseFinding]:
+@dataclass
+class Section:
+    title: str
+    clauses: list["Clause"]
+
+
+@dataclass
+class Clause:
+    id: str
+    text: str
+
+
+def split_into_sections(text: str) -> list[Section]:
     """
-    Splits the contract into its real numbered sections/clauses, then runs
-    every rule against each clause individually. Returns one ClauseFinding
-    per clause (status 'low' if no rule matched, otherwise the matched
-    rule's severity) so the full original structure can be reconstructed
-    by the frontend.
+    Splits raw contract text into sections (e.g. "1. DEFINITION OF...")
+    each containing numbered sub-clauses (e.g. "1.1", "1.2").
+
+    Falls back to a single section with the whole text as one clause
+    if no numbering pattern is detected (e.g. unstructured contracts),
+    OR if the detected pattern looks unreliable — e.g. a non-contract
+    document (study notes, articles, reports) that happens to contain a
+    few numbers shaped like "1.1" (page refs, statute sections, citations)
+    but isn't actually structured as numbered contract clauses.
     """
-    sections = split_into_sections(text)
-    findings: list[ClauseFinding] = []
+    text = " ".join(text.split())  # normalise whitespace/newlines
 
-    for section in sections:
-        section_label = section.title or "General"
-        for clause in section.clauses:
-            clean = " ".join(clause.text.split())
-            if not clean:
-                continue
+    header_matches = list(_SECTION_HEADER_PATTERN.finditer(text))
+    clause_matches = list(_CLAUSE_PATTERN.finditer(text))
 
-            matched_rule, excerpt, confidence = _match_clause(clean)
+    if not clause_matches or not _looks_like_real_clause_structure(text, clause_matches, header_matches):
+        return [Section(title="", clauses=[Clause(id="1", text=text)])]
 
-            if matched_rule:
-                findings.append(
-                    ClauseFinding(
-                        id=f"{matched_rule.id}-{clause.id}",
-                        category=section_label,
-                        title=matched_rule.title,
-                        severity=matched_rule.severity,
-                        confidence=confidence,
-                        excerpt=f"{clause.id} {clean}",
-                        explanation=matched_rule.explanation,
-                        recommendation=matched_rule.recommendation,
-                        line_number=None,
-                    )
-                )
-            else:
-                # No issue found — still emit a "low" finding so the clause
-                # appears in the reconstructed document as a clean/ok clause.
-                findings.append(
-                    ClauseFinding(
-                        id=f"clean-{clause.id}",
-                        category=section_label,
-                        title="No issues detected",
-                        severity="low",
-                        confidence=0.5,
-                        excerpt=f"{clause.id} {clean}",
-                        explanation="",
-                        recommendation="",
-                        line_number=None,
-                    )
-                )
+    # Build a lookup of section number -> title from header matches
+    titles: dict[str, str] = {}
+    for h in header_matches:
+        titles[h.group("num")] = h.group("title").strip().rstrip(".")
 
-    return findings
+    sections: dict[str, list[Clause]] = {}
+    section_order: list[str] = []
+
+    for i, match in enumerate(clause_matches):
+        clause_id = match.group("num")
+        start = match.end()
+        end = clause_matches[i + 1].start() if i + 1 < len(clause_matches) else len(text)
+        clause_text = text[start:end].strip()
+
+        if not clause_text:
+            continue
+
+        section_num = clause_id.split(".")[0]
+
+        if section_num not in sections:
+            sections[section_num] = []
+            section_order.append(section_num)
+
+        sections[section_num].append(Clause(id=clause_id, text=clause_text))
+
+    return [
+        Section(
+            title=f"{num}. {titles.get(num, 'Section ' + num)}",
+            clauses=sections[num],
+        )
+        for num in section_order
+    ]
 
 
-def _match_clause(clean_line: str) -> tuple[RiskRule | None, str, float]:
-    for rule in RISK_RULES:
-        for pattern in rule.patterns:
-            match = re.search(pattern, clean_line, re.IGNORECASE)
-            if match:
-                return rule, _excerpt_around(clean_line, match.start(), match.end()), 0.82
-    return None, clean_line, 0.0
+def _looks_like_real_clause_structure(text: str, clause_matches: list, header_matches: list) -> bool:
+    """
+    Heuristic sanity check to avoid treating non-contract documents
+    (study notes, articles, reports with case citations / statute
+    references) as if they were structured contracts.
+
+    Requires:
+    - At least one real section header (e.g. "1. DEFINITION OF...")
+      Most genuine contracts have these; prose documents with stray
+      numbers usually don't.
+    - Section numbers in the detected clauses are mostly sequential and
+      start near 1, rather than scattered/inconsistent (a strong signal
+      of real clause numbering vs. coincidental number matches like
+      "60A" or "14B" from statute citations).
+    """
+    if not header_matches:
+        return False
+
+    section_nums = []
+    for m in clause_matches:
+        try:
+            section_nums.append(int(m.group("num").split(".")[0]))
+        except ValueError:
+            continue
+
+    if not section_nums:
+        return False
+
+    # Real contracts rarely jump straight to large section numbers without
+    # smaller ones appearing first/often. If the spread of distinct section
+    # numbers is very large relative to how many clause matches there are,
+    # it's more likely coincidental matches from an unstructured document.
+    distinct_sections = set(section_nums)
+    if len(distinct_sections) > len(clause_matches):
+        return False
+
+    if max(distinct_sections) > 25:
+        return False
+
+    return True
 
 
-def calculate_risk_score(findings: list[ClauseFinding]) -> int:
-    weights = {"low": 0, "medium": 18, "high": 28, "critical": 40}
-    score = sum(weights[finding.severity] for finding in findings)
-    return min(score, 100)
-
-
-def risk_level_from_score(score: int) -> RiskLevel:
-    if score >= 80:
-        return "critical"
-    if score >= 55:
-        return "high"
-    if score >= 25:
-        return "medium"
-    return "low"
-
-
-def _excerpt_around(text: str, start: int, end: int, radius: int = 200) -> str:
-    left = max(start - radius, 0)
-    right = min(end + radius, len(text))
-    prefix = "..." if left > 0 else ""
-    suffix = "..." if right < len(text) else ""
-    return f"{prefix}{text[left:right]}{suffix}"
+def flatten_clauses(sections: list[Section]) -> list[Clause]:
+    """Convenience helper: returns every clause across all sections as a flat list."""
+    return [clause for section in sections for clause in section.clauses]
 
