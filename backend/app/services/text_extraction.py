@@ -8,7 +8,12 @@ from fastapi import HTTPException, UploadFile, status
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 
 
-async def extract_text_from_upload(file: UploadFile, max_upload_mb: int) -> str:
+async def read_and_validate_upload(file: UploadFile, max_upload_mb: int) -> tuple[bytes, str]:
+    """
+    Reads the upload once, validates size/type, and returns (content_bytes, extension).
+    Callers can reuse content_bytes for multiple purposes (text extraction,
+    PDF coordinate extraction, etc.) without re-reading the stream.
+    """
     content = await file.read()
     max_bytes = max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -24,14 +29,23 @@ async def extract_text_from_upload(file: UploadFile, max_upload_mb: int) -> str:
             detail=f"Unsupported file type. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}.",
         )
 
+    return content, extension
+
+
+def extract_text_from_bytes(content: bytes, extension: str) -> str:
     if extension in {".txt", ".md"}:
         return _decode_text(content)
     if extension == ".pdf":
         return _extract_pdf(content)
     if extension == ".docx":
         return _extract_docx(content)
-
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type.")
+
+
+async def extract_text_from_upload(file: UploadFile, max_upload_mb: int) -> str:
+    """Kept for backward compatibility — reads + extracts in one call."""
+    content, extension = await read_and_validate_upload(file, max_upload_mb)
+    return extract_text_from_bytes(content, extension)
 
 
 def _extension_for(file_name: str) -> str:
