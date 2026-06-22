@@ -43,6 +43,11 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function goPage(name) {
+  if (name === 'scanner') {
+    resetScanner();
+  } else if (name === 'history') {
+    closeHistoryDetail();
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
@@ -186,7 +191,7 @@ function onIssueClick(el, issueListElId, suggestionTextElId, copyBtnId) {
   if (!clause) return;
 
   const sEl = document.getElementById(suggestionTextElId);
-  if (sEl) sEl.textContent = clause.suggestion || 'No suggestion available.';
+  if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
 
   const btn = document.getElementById(copyBtnId);
   if (btn && clause.suggestion) {
@@ -213,7 +218,7 @@ function activateFindingById(findingId, contract, issueListEl, suggestionTextEl,
 
   const clause = contract.sections.flatMap(s => s.clauses).find(c => c.findingId === findingId);
   if (!clause) return;
-  if (suggestionTextEl) suggestionTextEl.textContent = clause.suggestion || 'No suggestion available.';
+  if (suggestionTextEl) suggestionTextEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
   if (copyBtn && clause.suggestion) {
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(clause.suggestion).catch(() => {});
@@ -250,7 +255,7 @@ function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, c
 
   // Show suggestion
   const sEl = document.getElementById(suggestionTextElId);
-  if (sEl) sEl.textContent = clause.suggestion || 'No suggestion available.';
+  if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
 
   const btn = document.getElementById(copyBtnId);
   if (btn && clause.suggestion) {
@@ -591,9 +596,9 @@ function showResults(contract) {
   // Show LLM review in suggestion box if available
   if (contract.llmReview) {
     const reviewText = contract.llmReview.review || '';
-    document.getElementById('suggestion-text').textContent = isAiErrorText(reviewText)
+    document.getElementById('suggestion-text').innerHTML = isAiErrorText(reviewText)
       ? 'Error. Please try again.'
-      : reviewText;
+      : renderMarkdown(reviewText);
   }
 }
 
@@ -846,6 +851,93 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════
+// RESIZABLE PANEL UTILITIES
+// ═══════════════════════════════════════════
+function makeResizable(dividerId, panelClass) {
+  const divider = document.getElementById(dividerId);
+  if (!divider) return;
+  const layout = divider.parentElement;
+  const panel = layout.querySelector(panelClass);
+  if (!panel) return;
+  
+  let isDragging = false;
+  
+  divider.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    divider.classList.add('dragging');
+    panel.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const layoutRect = layout.getBoundingClientRect();
+    const newWidth = layoutRect.right - e.clientX;
+    if (newWidth > 200 && newWidth < 800) {
+      panel.style.width = `${newWidth}px`;
+      panel.style.flex = 'none';
+    }
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      divider.classList.remove('dragging');
+      panel.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
+// Initialize resize handlers after DOM load
+window.addEventListener('DOMContentLoaded', () => {
+  makeResizable('scanner-resize-divider', '.issues-panel');
+  makeResizable('history-resize-divider', '.hd-issues-panel');
+});
+
+// ═══════════════════════════════════════════
+// MARKDOWN TO HTML RENDERER
+// ═══════════════════════════════════════════
+function renderMarkdown(text) {
+  if (!text) return '';
+  
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Bold text: **text** -> <strong>text</strong>
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Italic text: *text* -> <em>text</em>
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+  // Headings
+  html = html.replace(/^#### (.*?)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.*?)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.*?)$/gm, '<h1>$1</h1>');
+
+  // Bullet items: - item -> <li>item</li>
+  html = html.replace(/^\s*-\s+(.*?)$/gm, '<li>$1</li>');
+
+  const blocks = html.split('\n\n');
+  const renderedBlocks = blocks.map(block => {
+    block = block.trim();
+    if (!block) return '';
+    if (block.startsWith('<h') || block.startsWith('<li') || block.startsWith('<ul') || block.startsWith('<ol')) {
+      return block;
+    }
+    return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+  });
+
+  return renderedBlocks.join('\n');
 }
 
 // ═══════════════════════════════════════════
