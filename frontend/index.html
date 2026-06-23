@@ -221,43 +221,44 @@
       <div id="history-table-body"></div>
     </div>
   </div>
+</div>
 
-  <!-- Full-page detail overlay -->
-  <div class="history-detail" id="history-detail">
-    <div class="history-detail-bar">
-      <button class="back-btn" onclick="closeHistoryDetail()">← Back to history</button>
-      <h3 id="hd-title">–</h3>
-      <div class="status-chips" id="hd-chips"></div>
-      <button class="sidebar-toggle" id="history-sidebar-toggle" onclick="toggleSidebar('history')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
-        <span id="history-sidebar-toggle-label">Hide panel</span>
-      </button>
+<!-- Full-page detail overlay -->
+<div class="history-detail" id="history-detail">
+  <div class="history-detail-bar">
+    <button class="back-btn" onclick="closeHistoryDetail()">← Back to history</button>
+    <h3 id="hd-title">–</h3>
+    <div class="status-chips" id="hd-chips"></div>
+    <button class="sidebar-toggle" id="history-sidebar-toggle" onclick="toggleSidebar('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      <span id="history-sidebar-toggle-label">Hide panel</span>
+    </button>
+  </div>
+  <div class="history-detail-body">
+    <div class="history-contract-panel" id="history-contract-panel">
+      <div class="pdf-viewer" id="history-pdf-viewer"></div>
+      <div class="contract-page" id="history-page-content" style="display:none"></div>
     </div>
-    <div class="history-detail-body">
-      <div class="history-contract-panel" id="history-contract-panel">
-        <div class="pdf-viewer" id="history-pdf-viewer"></div>
-        <div class="contract-page" id="history-page-content" style="display:none"></div>
+    <div class="resize-divider" id="history-resize-divider"></div>
+    <div class="hd-issues-panel">
+      <div class="issues-header">
+        <h3>Compliance report</h3>
+        <div class="status-chips" id="hd-issue-chips"></div>
       </div>
-      <div class="resize-divider" id="history-resize-divider"></div>
-      <div class="hd-issues-panel">
-        <div class="issues-header">
-          <h3>Compliance report</h3>
-          <div class="status-chips" id="hd-issue-chips"></div>
+      <div class="issues-list" id="history-issues-list"></div>
+      <div class="suggestion-box" id="history-suggestion-box">
+        <div class="sug-label">💡 Suggested edit</div>
+        <p id="history-suggestion-text">Click an issue to see the suggested fix.</p>
+        <div class="sug-actions">
+          <button class="sug-btn apply" id="h-copy-btn">Copy suggestion</button>
+          <button class="sug-btn skip" onclick="dismissSuggestion('history')">Dismiss</button>
         </div>
-        <div class="issues-list" id="history-issues-list"></div>
-        <div class="suggestion-box" id="history-suggestion-box">
-          <div class="sug-label">💡 Suggested edit</div>
-          <p id="history-suggestion-text">Click an issue to see the suggested fix.</p>
-          <div class="sug-actions">
-            <button class="sug-btn apply" id="h-copy-btn">Copy suggestion</button>
-            <button class="sug-btn skip" onclick="dismissSuggestion('history')">Dismiss</button>
-          </div>
-        </div>
+      </div>
 
-      </div>
     </div>
   </div>
 </div>
+
 
 <!-- ══ SETTINGS ══ -->
 <div id="page-settings" class="page">

@@ -209,15 +209,37 @@ def fetch_unread_emails_sync() -> list[dict]:
         
         for email_id in email_ids:
             try:
-                status, data = mail.fetch(email_id, "(RFC822)")
-                if status != "OK" or not data or not data[0]:
+                # 1. Fetch Subject and From headers first to preserve privacy and bandwidth
+                status, header_data = mail.fetch(email_id, "(BODY[HEADER.FIELDS (SUBJECT FROM)])")
+                if status != "OK" or not header_data or not header_data[0]:
                     continue
                     
-                raw_email = data[0][1]
-                msg = email.message_from_bytes(raw_email)
+                raw_headers = header_data[0][1]
+                header_msg = email.message_from_bytes(raw_headers)
                 
-                subject = _decode_email_header(msg.get("Subject", "(No Subject)"))
-                sender = _decode_email_header(msg.get("From", "(Unknown Sender)"))
+                subject = _decode_email_header(header_msg.get("Subject", ""))
+                sender = _decode_email_header(header_msg.get("From", ""))
+                
+                # Check subject keywords (case-insensitive)
+                subject_lower = subject.lower()
+                contract_keywords = {
+                    "contract", "agreement", "nda", "compliance", "terms", "policy", 
+                    "signature", "signatory", "covenant", "liability", "proposal", 
+                    "addendum", "amendment"
+                }
+                
+                is_contract_subject = any(kw in subject_lower for kw in contract_keywords)
+                if not is_contract_subject:
+                    # Skip unrelated personal emails entirely, leaving them UNREAD (\Seen flag not touched)
+                    continue
+                    
+                # 2. Only fetch the full email payload if the subject matches contract heuristics
+                status, full_data = mail.fetch(email_id, "(RFC822)")
+                if status != "OK" or not full_data or not full_data[0]:
+                    continue
+                    
+                raw_email = full_data[0][1]
+                msg = email.message_from_bytes(raw_email)
                 
                 # Look for attachments
                 for part in msg.walk():
@@ -245,6 +267,7 @@ def fetch_unread_emails_sync() -> list[dict]:
                     })
                     
                 # Mark as seen so we don't process this email again next time
+                # Note: We only mark it as seen if it matches our subject filter, ensuring personal emails are untouched.
                 mail.store(email_id, '+FLAGS', '\\Seen')
                 
             except Exception as item_err:
