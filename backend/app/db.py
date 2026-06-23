@@ -18,8 +18,19 @@ def get_db_connection():
     if is_postgres():
         import psycopg2
         from psycopg2.extras import RealDictCursor
+        
+        # Strip pgbouncer query parameter which psycopg2 connection parser rejects
+        if "?" in url:
+            base_url, query = url.split("?", 1)
+            params = [p for p in query.split("&") if not p.startswith("pgbouncer=")]
+            if params:
+                url = base_url + "?" + "&".join(params)
+            else:
+                url = base_url
+                
         conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
         return conn
+
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(DB_PATH))
