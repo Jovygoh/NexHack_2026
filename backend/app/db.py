@@ -66,6 +66,17 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS email_config (
+                id SERIAL PRIMARY KEY,
+                imap_server TEXT NOT NULL,
+                imap_port INTEGER NOT NULL,
+                email_address TEXT NOT NULL,
+                email_password TEXT NOT NULL,
+                is_connected INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS contracts (
@@ -88,9 +99,21 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS email_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                imap_server TEXT NOT NULL,
+                imap_port INTEGER NOT NULL,
+                email_address TEXT NOT NULL,
+                email_password TEXT NOT NULL,
+                is_connected INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
     conn.commit()
     conn.close()
+
 
 def extract_company_from_text(text: str) -> str:
     if not text:
@@ -277,3 +300,54 @@ def clear_all_contracts():
     cursor.execute("DELETE FROM contracts")
     conn.commit()
     conn.close()
+
+def save_email_config(imap_server, imap_port, email_address, email_password) -> None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    p = get_placeholder()
+    
+    # Clear any previous configurations to only hold one active email inbox config
+    cursor.execute("DELETE FROM email_config")
+    
+    if is_postgres():
+        query = """
+            INSERT INTO email_config (imap_server, imap_port, email_address, email_password, is_connected)
+            VALUES (%s, %s, %s, %s, 1)
+        """
+    else:
+        query = """
+            INSERT INTO email_config (imap_server, imap_port, email_address, email_password, is_connected)
+            VALUES (?, ?, ?, ?, 1)
+        """
+    cursor.execute(query, (imap_server, imap_port, email_address, email_password))
+    conn.commit()
+    conn.close()
+
+def get_email_config():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT imap_server, imap_port, email_address, email_password, is_connected
+        FROM email_config
+        WHERE is_connected = 1
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "imap_server": row["imap_server"],
+            "imap_port": row["imap_port"],
+            "email_address": row["email_address"],
+            "email_password": row["email_password"],
+            "is_connected": bool(row["is_connected"])
+        }
+    return None
+
+def disconnect_email() -> None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE email_config SET is_connected = 0")
+    conn.commit()
+    conn.close()
+

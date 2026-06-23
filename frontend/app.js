@@ -659,9 +659,9 @@ function saveLocalScanHistory() {
 
 let SCAN_HISTORY = loadLocalScanHistory();
 
-async function loadScanHistory() {
+async function loadScanHistory(isSilent = false) {
   const btn = document.getElementById('btn-refresh-history');
-  if (btn) btn.textContent = '🔄 Syncing...';
+  if (btn && !isSilent) btn.textContent = '🔄 Syncing...';
   
   try {
     const res = await fetch(`${API_BASE}/api/history`);
@@ -683,8 +683,135 @@ async function loadScanHistory() {
   buildHistoryList();
   updateAutomatedScansCount();
   
-  if (btn) {
+  if (btn && !isSilent) {
     btn.textContent = '🔄 Refresh list';
+  }
+}
+
+async function checkEmailConnectionStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/automation/email-config`);
+    if (!res.ok) throw new Error(`Server status ${res.status}`);
+    const data = await res.json();
+    
+    const dot = document.getElementById('email-status-dot');
+    const label = document.getElementById('email-status-label');
+    const form = document.getElementById('email-connect-form');
+    const connView = document.getElementById('email-connected-view');
+    const emailLabel = document.getElementById('connected-email-label');
+    
+    if (data.is_connected) {
+      if (dot) {
+        dot.className = 'status-dot online';
+        dot.style.background = 'var(--green)';
+        dot.style.boxShadow = '0 0 8px var(--green)';
+      }
+      if (label) label.textContent = 'Connected';
+      if (form) form.style.display = 'none';
+      if (connView) connView.style.display = 'block';
+      if (emailLabel) emailLabel.textContent = data.email_address;
+    } else {
+      if (dot) {
+        dot.className = 'status-dot offline';
+        dot.style.background = 'var(--text3)';
+        dot.style.boxShadow = 'none';
+      }
+      if (label) label.textContent = 'Disconnected';
+      if (form) form.style.display = 'block';
+      if (connView) connView.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Failed to check email connection status:', err);
+  }
+}
+
+async function connectEmailInbox() {
+  const server = document.getElementById('imap-server').value.trim();
+  const portInput = document.getElementById('imap-port').value.trim();
+  const email = document.getElementById('email-address').value.trim();
+  const password = document.getElementById('email-password').value.trim();
+  
+  const btn = document.getElementById('btn-connect-email');
+  const errorMsg = document.getElementById('email-error-msg');
+  
+  const port = parseInt(portInput, 10);
+  
+  if (!server || !portInput || isNaN(port) || !email || !password) {
+    if (errorMsg) {
+      errorMsg.textContent = 'Please fill in all email settings fields.';
+      errorMsg.style.display = 'block';
+    }
+    return;
+  }
+  
+  if (errorMsg) errorMsg.style.display = 'none';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '🔌 Connecting...';
+  }
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/automation/email-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imap_server: server,
+        imap_port: port,
+        email_address: email,
+        email_password: password
+      })
+    });
+    
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(data.detail || `Server error ${res.status}`);
+    }
+    
+    // Clear password input
+    document.getElementById('email-password').value = '';
+    
+    // Check status
+    await checkEmailConnectionStatus();
+    
+  } catch (err) {
+    console.error('Email connection failed:', err);
+    if (errorMsg) {
+      errorMsg.textContent = err.message;
+      errorMsg.style.display = 'block';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔌 Connect Inbox';
+    }
+  }
+}
+
+async function disconnectEmailInbox() {
+  if (!confirm('Disconnect your email inbox? The backend will stop automated email monitoring.')) return;
+  
+  const btn = document.getElementById('btn-disconnect-email');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Disconnecting...';
+  }
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/automation/email-config`, {
+      method: 'DELETE'
+    });
+    
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    
+    await checkEmailConnectionStatus();
+  } catch (err) {
+    console.error('Failed to disconnect email:', err);
+    alert('Failed to disconnect email inbox.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔌 Disconnect Inbox';
+    }
   }
 }
 
@@ -1145,6 +1272,16 @@ function renderMarkdown(text) {
 // INIT
 // ═══════════════════════════════════════════
 loadScanHistory();
+checkEmailConnectionStatus();
+
+// Automatically sync history and connection status every 4 seconds in the background
+setInterval(() => {
+  const historyPage = document.getElementById('page-history');
+  if (historyPage && historyPage.classList.contains('active')) {
+    loadScanHistory(true); // silent sync without button text blinking
+    checkEmailConnectionStatus();
+  }
+}, 4000);
 
 // ═══════════════════════════════════════════
 // SEVERITY STATUS CHIP FILTERING

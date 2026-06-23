@@ -14,7 +14,7 @@ from app.services.risk_rules import analyze_text, calculate_risk_score, risk_lev
 from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
 from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
-from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts
+from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts, get_email_config, save_email_config, disconnect_email
 from app.services.automation import start_automation_watcher, process_incoming_contracts, AUTO_IMPORT_DIR, AUTO_IMPORT_PROCESSED_DIR
 
 settings = get_settings()
@@ -353,4 +353,62 @@ async def trigger_automation():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Folder scan failed: {str(e)}"
         )
+
+class EmailConfigParams(BaseModel):
+    imap_server: str
+    imap_port: int
+    email_address: str
+    email_password: str
+
+@app.get("/api/automation/email-config")
+def get_email_connection_status():
+    config = get_email_config()
+    if config:
+        return {
+            "is_connected": True,
+            "email_address": config["email_address"],
+            "imap_server": config["imap_server"],
+            "imap_port": config["imap_port"]
+        }
+    return {"is_connected": False}
+
+@app.post("/api/automation/email-config")
+def connect_email_inbox(params: EmailConfigParams):
+    import imaplib
+    try:
+        # Test IMAP connection synchronously
+        mail = imaplib.IMAP4_SSL(params.imap_server, params.imap_port)
+        mail.login(params.email_address, params.email_password)
+        mail.logout()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Email connection check failed. Please check host, port, credentials, or App Password setup. Details: {str(e)}"
+        )
+        
+    try:
+        save_email_config(
+            params.imap_server,
+            params.imap_port,
+            params.email_address,
+            params.email_password
+        )
+        return {"status": "ok", "message": "Email inbox connected and active."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store email connection configuration: {str(e)}"
+        )
+
+@app.delete("/api/automation/email-config")
+def disconnect_email_inbox():
+    try:
+        disconnect_email()
+        return {"status": "ok", "message": "Email inbox disconnected successfully."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to disconnect: {str(e)}"
+        )
+
 
