@@ -195,6 +195,10 @@ function onIssueClick(el, issueListElId, suggestionTextElId, copyBtnId) {
   const sEl = document.getElementById(suggestionTextElId);
   if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
 
+  const boxId = suggestionTextElId === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
+  const boxEl = document.getElementById(boxId);
+  if (boxEl) boxEl.classList.remove('collapsed');
+
   const btn = document.getElementById(copyBtnId);
   if (btn && clause.suggestion) {
     btn.onclick = () => {
@@ -221,6 +225,11 @@ function activateFindingById(findingId, contract, issueListEl, suggestionTextEl,
   const clause = contract.sections.flatMap(s => s.clauses).find(c => c.findingId === findingId);
   if (!clause) return;
   if (suggestionTextEl) suggestionTextEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
+
+  const boxId = suggestionTextEl.id === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
+  const boxEl = document.getElementById(boxId);
+  if (boxEl) boxEl.classList.remove('collapsed');
+
   if (copyBtn && clause.suggestion) {
     copyBtn.onclick = () => {
       navigator.clipboard.writeText(clause.suggestion).catch(() => {});
@@ -258,6 +267,10 @@ function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, c
   // Show suggestion
   const sEl = document.getElementById(suggestionTextElId);
   if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
+
+  const boxId = suggestionTextElId === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
+  const boxEl = document.getElementById(boxId);
+  if (boxEl) boxEl.classList.remove('collapsed');
 
   const btn = document.getElementById(copyBtnId);
   if (btn && clause.suggestion) {
@@ -1087,4 +1100,13 @@ function toggleSeverityFilter(status, context) {
     }
   }
 }
+
+function dismissSuggestion(context) {
+  const boxId = context === 'scanner' ? 'suggestion-box' : 'history-suggestion-box';
+  const box = document.getElementById(boxId);
+  if (box) {
+    box.classList.add('collapsed');
+  }
+}
+
 

@@ -257,8 +257,19 @@ def risk_level_from_score(score: int) -> RiskLevel:
 
 def _excerpt_around(text: str, start: int, end: int, radius: int = 200) -> str:
     left = max(start - radius, 0)
+    if left > 0:
+        space_idx = text.find(" ", left)
+        if space_idx != -1 and space_idx < start:
+            left = space_idx + 1
+
     right = min(end + radius, len(text))
+    if right < len(text):
+        space_idx = text.rfind(" ", start, right)
+        if space_idx != -1 and space_idx > end:
+            right = space_idx
+
     prefix = "..." if left > 0 else ""
     suffix = "..." if right < len(text) else ""
     return f"{prefix}{text[left:right]}{suffix}"
+
 

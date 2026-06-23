@@ -128,9 +128,10 @@
         <p id="suggestion-text">Click an issue to see the suggested fix.</p>
         <div class="sug-actions">
           <button class="sug-btn apply" id="copy-btn">Copy suggestion</button>
-          <button class="sug-btn skip">Dismiss</button>
+          <button class="sug-btn skip" onclick="dismissSuggestion('scanner')">Dismiss</button>
         </div>
       </div>
+
     </div>
   </div>
 
@@ -194,9 +195,10 @@
           <p id="history-suggestion-text">Click an issue to see the suggested fix.</p>
           <div class="sug-actions">
             <button class="sug-btn apply" id="h-copy-btn">Copy suggestion</button>
-            <button class="sug-btn skip">Dismiss</button>
+            <button class="sug-btn skip" onclick="dismissSuggestion('history')">Dismiss</button>
           </div>
         </div>
+
       </div>
     </div>
   </div>
