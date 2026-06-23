@@ -17,7 +17,9 @@
   <div class="nav-links">
     <button class="nav-btn active" onclick="goPage('home')">Home</button>
     <button class="nav-btn" onclick="goPage('scanner')">Scanner</button>
+    <button class="nav-btn" onclick="goPage('autoscan')">Auto-Scan</button>
     <button class="nav-btn" onclick="goPage('history')">History</button>
+    <button class="nav-btn" onclick="goPage('settings')">Settings</button>
   </div>
   <div class="backend-status" id="backend-status" onclick="checkBackend()">
     <div class="status-dot" id="status-dot"></div>
@@ -143,28 +145,26 @@
   </div>
 </div>
 
-<!-- ══ HISTORY ══ -->
-<div id="page-history" class="page">
+<!-- ══ AUTO-SCAN ══ -->
+<div id="page-autoscan" class="page">
   <div class="history-wrap">
-    <div class="page-title">Scan history</div>
-    <div class="page-sub">All previous contract scans. Click a contract name to view the full result.</div>
+    <div class="page-title">Automated Contract Intake</div>
+    <div class="page-sub">Monitors inbound folders and connected email inboxes for new contract files.</div>
     
-    <!-- Automated Intake Dashboard -->
     <div class="automation-dashboard">
       <div class="auto-header">
         <div class="auto-title">
           <div class="auto-icon">🤖</div>
           <div>
-            <h3>Automated Contract Intake</h3>
+            <h3>Folder & Inbox Monitor</h3>
             <div class="auto-status">
               <span class="pulse-dot"></span>
-              <span class="status-text" id="auto-status-text">Active · Monitoring folders</span>
+              <span class="status-text" id="auto-status-text">Active · Monitoring folders & email</span>
             </div>
           </div>
         </div>
         <div class="auto-actions">
           <button class="filter-btn btn-sm" id="btn-trigger-scan" onclick="triggerAutoScan()">⚡ Scan folder now</button>
-          <button class="filter-btn btn-sm" id="btn-refresh-history" onclick="loadScanHistory()">🔄 Refresh list</button>
         </div>
       </div>
       <div class="auto-grid">
@@ -181,56 +181,27 @@
           <span class="metric-val" id="automated-scans-count">0</span>
         </div>
       </div>
-      
-      <!-- Inbound Email Configuration -->
-      <div class="email-config-container" id="email-config-container">
-        <div class="email-config-header">
-          <div class="email-config-title">
-            <span class="email-icon">📧</span>
-            <h4>Inbound Email Integration</h4>
-          </div>
-          <div class="email-conn-status" id="email-conn-status">
-            <div class="status-dot offline" id="email-status-dot"></div>
-            <span id="email-status-label">Disconnected</span>
-          </div>
-        </div>
-        
-        <!-- Form when disconnected -->
-        <div class="email-form" id="email-connect-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="imap-server">IMAP Server</label>
-              <input type="text" id="imap-server" placeholder="imap.gmail.com" value="imap.gmail.com">
-            </div>
-            <div class="form-group">
-              <label for="imap-port">Port</label>
-              <input type="number" id="imap-port" placeholder="993" value="993">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="email-address">Email Address</label>
-              <input type="email" id="email-address" placeholder="yourname@gmail.com">
-            </div>
-            <div class="form-group">
-              <label for="email-password">App Password <span class="info-icon" title="Use an App Password generated from your email account security settings, NOT your primary login password.">ℹ️</span></label>
-              <input type="password" id="email-password" placeholder="xxxx xxxx xxxx xxxx">
-            </div>
-          </div>
-          <div id="email-error-msg" class="email-error-msg" style="display:none"></div>
-          <button class="filter-btn btn-sm btn-connect" id="btn-connect-email" onclick="connectEmailInbox()">🔌 Connect Inbox</button>
-        </div>
-        
-        <!-- View when connected -->
-        <div class="email-connected-view" id="email-connected-view" style="display:none">
-          <p>Monitoring inbox: <strong id="connected-email-label">yourname@gmail.com</strong></p>
-          <div class="info-tip">
-            💡 <strong>How to test:</strong> Send an email to this address with a contract attached (PDF, DOCX, or TXT). The system will automatically detect the email, extract the contract, run compliance checks, and add it below in real-time.
-          </div>
-          <button class="filter-btn btn-sm btn-disconnect" id="btn-disconnect-email" onclick="disconnectEmailInbox()">🔌 Disconnect Inbox</button>
-        </div>
-      </div>
     </div>
+
+    <div class="section-label" style="margin-top:32px;margin-bottom:12px">Automated Scans Feed</div>
+    <div class="history-table">
+      <div class="table-header">
+        <span>Date / Time</span>
+        <span>Contract name</span>
+        <span>Company</span>
+        <span>Status</span>
+        <span></span>
+      </div>
+      <div id="autoscan-table-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ HISTORY ══ -->
+<div id="page-history" class="page">
+  <div class="history-wrap">
+    <div class="page-title">Scan history</div>
+    <div class="page-sub">All previous contract scans. Click a contract name to view the full result.</div>
 
     <div class="history-filters">
       <button class="filter-btn active" onclick="filterHistory(this,'all')">All</button>
@@ -283,6 +254,65 @@
           </div>
         </div>
 
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SETTINGS ══ -->
+<div id="page-settings" class="page">
+  <div class="history-wrap">
+    <div class="page-title">Settings</div>
+    <div class="page-sub">Configure inbound email connection credentials and server parameters.</div>
+    
+    <div class="automation-dashboard">
+      <!-- Inbound Email Configuration -->
+      <div class="email-config-container" id="email-config-container" style="border:none; margin:0; padding:0">
+        <div class="email-config-header">
+          <div class="email-config-title">
+            <span class="email-icon">📧</span>
+            <h4>Inbound Email Integration</h4>
+          </div>
+          <div class="email-conn-status" id="email-conn-status">
+            <div class="status-dot offline" id="email-status-dot"></div>
+            <span id="email-status-label">Disconnected</span>
+          </div>
+        </div>
+        
+        <!-- Form when disconnected -->
+        <div class="email-form" id="email-connect-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="imap-server">IMAP Server</label>
+              <input type="text" id="imap-server" placeholder="imap.gmail.com" value="imap.gmail.com">
+            </div>
+            <div class="form-group">
+              <label for="imap-port">Port</label>
+              <input type="number" id="imap-port" placeholder="993" value="993">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="email-address">Email Address</label>
+              <input type="email" id="email-address" placeholder="yourname@gmail.com">
+            </div>
+            <div class="form-group">
+              <label for="email-password">App Password <span class="info-icon" title="Use an App Password generated from your email account security settings, NOT your primary login password.">ℹ️</span></label>
+              <input type="password" id="email-password" placeholder="xxxx xxxx xxxx xxxx">
+            </div>
+          </div>
+          <div id="email-error-msg" class="email-error-msg" style="display:none"></div>
+          <button class="filter-btn btn-sm btn-connect" id="btn-connect-email" onclick="connectEmailInbox()">🔌 Connect Inbox</button>
+        </div>
+        
+        <!-- View when connected -->
+        <div class="email-connected-view" id="email-connected-view" style="display:none">
+          <p>Monitoring inbox: <strong id="connected-email-label">yourname@gmail.com</strong></p>
+          <div class="info-tip">
+            💡 <strong>How to test:</strong> Send an email to this address with a contract attached (PDF, DOCX, or TXT). The system will automatically detect the email, extract the contract, run compliance checks, and add it below in real-time.
+          </div>
+          <button class="filter-btn btn-sm btn-disconnect" id="btn-disconnect-email" onclick="disconnectEmailInbox()">🔌 Disconnect Inbox</button>
+        </div>
       </div>
     </div>
   </div>

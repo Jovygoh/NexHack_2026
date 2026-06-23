@@ -45,13 +45,18 @@ window.addEventListener('DOMContentLoaded', () => {
 function goPage(name) {
   if (name === 'scanner') {
     resetScanner();
-  } else if (name === 'history') {
+  } else if (name === 'history' || name === 'autoscan') {
     closeHistoryDetail();
   }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-btn')[['home','scanner','history'].indexOf(name)].classList.add('active');
+  
+  const pages = ['home', 'scanner', 'autoscan', 'history', 'settings'];
+  const idx = pages.indexOf(name);
+  if (idx !== -1) {
+    document.querySelectorAll('.nav-btn')[idx].classList.add('active');
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -822,22 +827,45 @@ function updateAutomatedScansCount() {
 }
 
 function buildHistoryList(filter = 'all') {
+  // 1. General history table
   const body = document.getElementById('history-table-body');
-  const rows = SCAN_HISTORY.filter(c => filter === 'all' || c.status === filter);
-  body.innerHTML = rows.map(c => `
-    <div class="table-row">
-      <div class="date-col">${c.date}<div class="time">${c.time}</div></div>
-      <span class="contract-link" onclick="openHistoryDetail(${c.id})">${c.filename}</span>
-      <span class="company-col">${c.company}</span>
-      <span><div class="status-badge ${c.status}">${
-        c.status === 'safe' ? '✓ Safe' : c.status === 'issues' ? '⚠ Issues' : '✕ Critical'
-      }</div></span>
-      <span style="display:flex;gap:4px">
-        <button class="view-btn" onclick="openHistoryDetail(${c.id})">View</button>
-        <button class="view-btn" style="border-color:var(--red);color:var(--red)" onclick="deleteHistoryItem(${c.id}, event)">✕</button>
-      </span>
-    </div>
-  `).join('');
+  if (body) {
+    const rows = SCAN_HISTORY.filter(c => filter === 'all' || c.status === filter);
+    body.innerHTML = rows.map(c => `
+      <div class="table-row">
+        <div class="date-col">${c.date}<div class="time">${c.time}</div></div>
+        <span class="contract-link" onclick="openHistoryDetail(${c.id})">${c.filename}</span>
+        <span class="company-col">${c.company}</span>
+        <span><div class="status-badge ${c.status}">${
+          c.status === 'safe' ? '✓ Safe' : c.status === 'issues' ? '⚠ Issues' : '✕ Critical'
+        }</div></span>
+        <span style="display:flex;gap:4px">
+          <button class="view-btn" onclick="openHistoryDetail(${c.id})">View</button>
+          <button class="view-btn" style="border-color:var(--red);color:var(--red)" onclick="deleteHistoryItem(${c.id}, event)">✕</button>
+        </span>
+      </div>
+    `).join('');
+  }
+
+  // 2. Automatically scanned contracts table (Auto-Scan tab)
+  const autoBody = document.getElementById('autoscan-table-body');
+  if (autoBody) {
+    const autoRows = SCAN_HISTORY.filter(c => c.is_automated);
+    autoBody.innerHTML = autoRows.map(c => `
+      <div class="table-row">
+        <div class="date-col">${c.date}<div class="time">${c.time}</div></div>
+        <span class="contract-link" onclick="openHistoryDetail(${c.id})">${c.filename}</span>
+        <span class="company-col">${c.company}</span>
+        <span><div class="status-badge ${c.status}">${
+          c.status === 'safe' ? '✓ Safe' : c.status === 'issues' ? '⚠ Issues' : '✕ Critical'
+        }</div></span>
+        <span style="display:flex;gap:4px">
+          <button class="view-btn" onclick="openHistoryDetail(${c.id})">View</button>
+          <button class="view-btn" style="border-color:var(--red);color:var(--red)" onclick="deleteHistoryItem(${c.id}, event)">✕</button>
+        </span>
+      </div>
+    `).join('');
+  }
 }
 
 function filterHistory(btn, filter) {
@@ -1277,7 +1305,14 @@ checkEmailConnectionStatus();
 // Automatically sync history and connection status every 4 seconds in the background
 setInterval(() => {
   const historyPage = document.getElementById('page-history');
-  if (historyPage && historyPage.classList.contains('active')) {
+  const autoScanPage = document.getElementById('page-autoscan');
+  const settingsPage = document.getElementById('page-settings');
+  
+  const isHistoryActive = historyPage && historyPage.classList.contains('active');
+  const isAutoScanActive = autoScanPage && autoScanPage.classList.contains('active');
+  const isSettingsActive = settingsPage && settingsPage.classList.contains('active');
+  
+  if (isHistoryActive || isAutoScanActive || isSettingsActive) {
     loadScanHistory(true); // silent sync without button text blinking
     checkEmailConnectionStatus();
   }
