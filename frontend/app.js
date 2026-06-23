@@ -125,6 +125,7 @@ function renderContractPage(contract, containerEl, issueListEl, chipOk, chipWarn
     const descSnippet = (c.desc || '').substring(0, 90);
     return `
       <div class="issue-item" id="${issueListEl.id}-issue-${safeId}"
+        data-status="${c.status}"
         onclick="pickIssue('${c.id}','${containerEl.id}','${issueListEl.id}','${suggestionTextEl.id}','${copyBtn.id}')">
         <div class="issue-top">
           <div class="issue-badge ${c.status}">${c.id}</div>
@@ -157,6 +158,7 @@ function renderIssuesList(contract, issueListEl, chipOk, chipWarn, chipBad, sugg
     return `
       <div class="issue-item" id="${issueListEl.id}-issue-${safeId}"
         data-finding-id="${c.findingId || ''}"
+        data-status="${c.status}"
         onclick="onIssueClick(this, '${issueListEl.id}', '${suggestionTextEl.id}', '${copyBtn.id}')">
         <div class="issue-top">
           <div class="issue-badge ${c.status}">${c.id}</div>
@@ -519,6 +521,7 @@ async function startScan() {
 }
 
 function showResults(contract) {
+  toggleSeverityFilter(null, 'scanner');
   document.getElementById('upload-view').style.display = 'none';
   document.getElementById('progress-bar').classList.remove('show');
   document.getElementById('progress-fill').style.background = '';
@@ -676,6 +679,7 @@ function clearScanHistory() {
 }
 
 function openHistoryDetail(id) {
+  toggleSeverityFilter(null, 'history');
   const contract = SCAN_HISTORY.find(c => c.id === id);
   if (!contract) return;
 
@@ -695,9 +699,9 @@ function openHistoryDetail(id) {
     <div class="chip bad">✕ ${bad}</div>
   `;
   document.getElementById('hd-issue-chips').innerHTML = `
-    <div class="chip ok">✓ ${ok} safe</div>
-    <div class="chip warn">⚠ ${warn} warn</div>
-    <div class="chip bad">✕ ${bad} critical</div>
+    <div class="chip ok" onclick="toggleSeverityFilter('ok', 'history')">✓ ${ok} safe</div>
+    <div class="chip warn" onclick="toggleSeverityFilter('warn', 'history')">⚠ ${warn} warn</div>
+    <div class="chip bad" onclick="toggleSeverityFilter('bad', 'history')">✕ ${bad} critical</div>
   `;
 
   if (contract.pdfBase64) {
@@ -1001,3 +1005,86 @@ function renderMarkdown(text) {
 // INIT
 // ═══════════════════════════════════════════
 buildHistoryList();
+
+// ═══════════════════════════════════════════
+// SEVERITY STATUS CHIP FILTERING
+// ═══════════════════════════════════════════
+let _activeFilters = {
+  scanner: null,
+  history: null
+};
+
+function toggleSeverityFilter(status, context) {
+  const current = _activeFilters[context];
+  const newFilter = (status === null || current === status) ? null : status;
+  _activeFilters[context] = newFilter;
+
+  // 1. Update chip active states in the header
+  const containerId = context === 'scanner' ? 'results-view' : 'history-detail';
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const chips = container.querySelectorAll('.status-chips .chip');
+  chips.forEach(chip => {
+    let chipStatus = '';
+    if (chip.classList.contains('ok')) chipStatus = 'ok';
+    else if (chip.classList.contains('warn')) chipStatus = 'warn';
+    else if (chip.classList.contains('bad')) chipStatus = 'bad';
+
+    if (newFilter && chipStatus === newFilter) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
+  });
+
+  // 2. Filter the issues list
+  const listId = context === 'scanner' ? 'issues-list' : 'history-issues-list';
+  const listEl = document.getElementById(listId);
+  if (listEl) {
+    const items = listEl.querySelectorAll('.issue-item');
+    items.forEach(item => {
+      const itemStatus = item.dataset.status;
+      if (!newFilter || itemStatus === newFilter) {
+        item.style.display = 'block';
+      } else {
+        item.style.display = 'none';
+      }
+    });
+  }
+
+  // 3. Filter PDF highlights (if rendering PDF)
+  const pdfId = context === 'scanner' ? 'pdf-viewer' : 'history-pdf-viewer';
+  const pdfEl = document.getElementById(pdfId);
+  if (pdfEl && pdfEl.style.display !== 'none') {
+    const highlights = pdfEl.querySelectorAll('.pdf-highlight');
+    highlights.forEach(hl => {
+      const isCriticalOrHigh = hl.classList.contains('sev-critical') || hl.classList.contains('sev-high');
+      const isMedium = hl.classList.contains('sev-medium');
+      let hlStatus = 'ok';
+      if (isCriticalOrHigh) hlStatus = 'bad';
+      else if (isMedium) hlStatus = 'warn';
+
+      if (!newFilter || hlStatus === newFilter) {
+        hl.style.display = 'block';
+      } else {
+        hl.style.display = 'none';
+      }
+    });
+  }
+
+  // 4. Filter text highlights (if in plain text mode)
+  const textId = context === 'scanner' ? 'contract-page-content' : 'history-page-content';
+  const textEl = document.getElementById(textId);
+  if (textEl && textEl.style.display !== 'none') {
+    textEl.classList.remove('filter-only-bad', 'filter-only-warn', 'filter-only-ok');
+    if (newFilter === 'bad') {
+      textEl.classList.add('filter-only-bad');
+    } else if (newFilter === 'warn') {
+      textEl.classList.add('filter-only-warn');
+    } else if (newFilter === 'ok') {
+      textEl.classList.add('filter-only-ok');
+    }
+  }
+}
+

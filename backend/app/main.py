@@ -127,7 +127,8 @@ async def analyze_contract(
             for finding in findings:
                 if finding.severity == "low":
                     continue
-                matched = match_excerpt_to_boxes(extraction, finding.excerpt, finding.severity)
+                query_excerpt = finding.matched_snippet or finding.excerpt
+                matched = match_excerpt_to_boxes(extraction, query_excerpt, finding.severity)
                 for box in matched:
                     boxes.append(HighlightBoxOut(
                         finding_id=finding.id,
@@ -139,6 +140,7 @@ async def analyze_contract(
                         severity=box.severity,
                     ))
             highlight_boxes_out = boxes
+
         except Exception as e:
             # If coordinate extraction fails for any reason (malformed PDF,
             # scanned/image-only PDF with no extractable words, etc.), fall

@@ -205,6 +205,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         explanation=matched_rule.explanation,
                         recommendation=matched_rule.recommendation,
                         line_number=None,
+                        matched_snippet=excerpt,
                     )
                 )
             else:
@@ -221,8 +222,10 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         explanation="",
                         recommendation="",
                         line_number=None,
+                        matched_snippet=None,
                     )
                 )
+
 
     return findings
 

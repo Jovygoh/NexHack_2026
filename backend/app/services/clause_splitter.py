@@ -26,6 +26,12 @@ _SECTION_HEADER_PATTERN = re.compile(
     r"(?<![\d.])(?P<num>\d{1,2})\.\s+(?P<title>[A-Z][A-Z\s\-]{2,60}?)(?=\s+\d{1,2}\.\d{1,2}\s|\s+\d{1,2}\.\s|$)"
 )
 
+# Matches flat clause numbers like "1. ", "2. ", "10. " at a word boundary,
+# followed by a space and then an uppercase letter or quote.
+_FLAT_CLAUSE_PATTERN = re.compile(
+    r"(?<![\d.])(?P<num>\d{1,2})\.\s+(?=[A-Z'])"
+)
+
 
 @dataclass
 class Section:
@@ -44,20 +50,25 @@ def split_into_sections(text: str) -> list[Section]:
     Splits raw contract text into sections (e.g. "1. DEFINITION OF...")
     each containing numbered sub-clauses (e.g. "1.1", "1.2").
 
-    Falls back to a single section with the whole text as one clause
-    if no numbering pattern is detected (e.g. unstructured contracts),
-    OR if the detected pattern looks unreliable — e.g. a non-contract
-    document (study notes, articles, reports) that happens to contain a
-    few numbers shaped like "1.1" (page refs, statute sections, citations)
-    but isn't actually structured as numbered contract clauses.
+    Falls back to trying flat-numbered list split (e.g. "1.", "2.")
+    if no decimal matches exist, and finally falls back to a single
+    section with the whole text as one clause if no structure is found.
     """
     text = " ".join(text.split())  # normalise whitespace/newlines
 
     header_matches = list(_SECTION_HEADER_PATTERN.finditer(text))
     clause_matches = list(_CLAUSE_PATTERN.finditer(text))
 
-    if not clause_matches or not _looks_like_real_clause_structure(text, clause_matches, header_matches):
-        return [Section(title="", clauses=[Clause(id="1", text=text)])]
+    # Determine if we have a valid decimal clause structure
+    has_decimal_structure = clause_matches and _looks_like_real_clause_structure(text, clause_matches, header_matches)
+
+    if not has_decimal_structure:
+        # Try flat numbering (e.g., "1.", "2.") before falling back completely
+        flat_matches = list(_FLAT_CLAUSE_PATTERN.finditer(text))
+        if flat_matches and _looks_like_real_flat_structure(text, flat_matches):
+            clause_matches = flat_matches
+        else:
+            return [Section(title="", clauses=[Clause(id="1", text=text)])]
 
     # Build a lookup of section number -> title from header matches
     titles: dict[str, str] = {}
@@ -86,7 +97,7 @@ def split_into_sections(text: str) -> list[Section]:
 
     return [
         Section(
-            title=f"{num}. {titles.get(num, 'Section ' + num)}",
+            title=f"{num}. {titles[num]}" if num in titles else "",
             clauses=sections[num],
         )
         for num in section_order
@@ -135,7 +146,40 @@ def _looks_like_real_clause_structure(text: str, clause_matches: list, header_ma
     return True
 
 
+def _looks_like_real_flat_structure(text: str, flat_matches: list) -> bool:
+    """
+    Sanity check to make sure flat numbering looks like a sequential clause structure.
+    """
+    if len(flat_matches) < 2:
+        return False
+
+    nums = []
+    for m in flat_matches:
+        try:
+            nums.append(int(m.group("num")))
+        except ValueError:
+            continue
+
+    if not nums:
+        return False
+
+    # A flat structure should start near 1 or 2
+    if min(nums) > 2:
+        return False
+
+    # Check if there is some sequential progression
+    sequential_count = 0
+    for i in range(1, len(nums)):
+        if nums[i] == nums[i - 1] + 1 or nums[i] == nums[i - 1]:
+            sequential_count += 1
+
+    # If at least some numbers are sequential or consecutive, it looks like list items
+    if sequential_count >= 1 or len(nums) >= 2:
+        return True
+
+    return False
+
+
 def flatten_clauses(sections: list[Section]) -> list[Clause]:
     """Convenience helper: returns every clause across all sections as a flat list."""
     return [clause for section in sections for clause in section.clauses]
-

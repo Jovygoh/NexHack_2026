@@ -13,6 +13,8 @@ class ClauseFinding(BaseModel):
     explanation: str
     recommendation: str
     line_number: int | None = None
+    matched_snippet: str | None = None
+
 
 class LlmReview(BaseModel):
     provider: str

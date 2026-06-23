@@ -36,3 +36,21 @@ def test_risk_score_maps_to_level() -> None:
 
     assert score > 0
     assert risk_level_from_score(score) in {"medium", "high", "critical"}
+
+
+def test_flat_clause_splitting() -> None:
+    from app.services.clause_splitter import split_into_sections
+    text = """
+    NOW therefore it is hereby agreed as follows:
+    1. In consideration of the payments to be made to the Service Provider.
+    2. The Institute shall pay the Service Provider such sums.
+    3. The Quality of performance related to the work is the essence.
+    """
+    sections = split_into_sections(text)
+    assert len(sections) == 3
+    assert sections[0].title == ""
+    assert len(sections[0].clauses) == 1
+    assert sections[0].clauses[0].id == "1"
+    assert sections[0].clauses[0].text == "In consideration of the payments to be made to the Service Provider."
+    assert sections[1].clauses[0].id == "2"
+    assert sections[2].clauses[0].id == "3"

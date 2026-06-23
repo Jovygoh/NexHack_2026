@@ -116,10 +116,11 @@
       <div class="issues-header">
         <h3>Compliance report</h3>
         <div class="status-chips">
-          <div class="chip ok" id="s-chip-ok">✓ 0 safe</div>
-          <div class="chip warn" id="s-chip-warn">⚠ 0 warn</div>
-          <div class="chip bad" id="s-chip-bad">✕ 0 critical</div>
+          <div class="chip ok" id="s-chip-ok" onclick="toggleSeverityFilter('ok', 'scanner')">✓ 0 safe</div>
+          <div class="chip warn" id="s-chip-warn" onclick="toggleSeverityFilter('warn', 'scanner')">⚠ 0 warn</div>
+          <div class="chip bad" id="s-chip-bad" onclick="toggleSeverityFilter('bad', 'scanner')">✕ 0 critical</div>
         </div>
+
       </div>
       <div class="issues-list" id="issues-list"></div>
       <div class="suggestion-box" id="suggestion-box">

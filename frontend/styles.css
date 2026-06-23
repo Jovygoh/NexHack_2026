@@ -263,3 +263,37 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:3px}
+
+/* Interactive Status Chips and Filtering */
+.status-chips .chip {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+.status-chips .chip:hover {
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+.status-chips .chip.active {
+  box-shadow: 0 0 0 2px currentColor;
+  font-weight: 700;
+}
+
+/* HTML Highlight Filtering Rules */
+.contract-page.filter-only-bad .hl-amber {
+  background: transparent;
+  border-bottom: none;
+  cursor: default;
+}
+.contract-page.filter-only-warn .hl-red {
+  background: transparent;
+  border-bottom: none;
+  cursor: default;
+}
+.contract-page.filter-only-ok .hl-red,
+.contract-page.filter-only-ok .hl-amber {
+  background: transparent;
+  border-bottom: none;
+  cursor: default;
+}
+
