@@ -203,6 +203,10 @@ def fetch_unread_emails_sync() -> list[dict]:
             return []
             
         email_ids = messages[0].split()
+        
+        # Take only the 15 most recent unread emails to avoid getting stuck on thousands of historical unread emails
+        email_ids = list(reversed(email_ids))[:15]
+        
         for email_id in email_ids:
             try:
                 status, data = mail.fetch(email_id, "(RFC822)")
@@ -218,8 +222,6 @@ def fetch_unread_emails_sync() -> list[dict]:
                 # Look for attachments
                 for part in msg.walk():
                     if part.get_content_maintype() == 'multipart':
-                        continue
-                    if part.get('Content-Disposition') is None:
                         continue
                         
                     filename = _decode_email_header(part.get_filename() or "")
