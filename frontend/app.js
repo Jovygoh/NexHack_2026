@@ -43,10 +43,9 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 function goPage(name) {
+  closeHistoryDetail();
   if (name === 'scanner') {
     resetScanner();
-  } else if (name === 'history' || name === 'autoscan') {
-    closeHistoryDetail();
   }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
