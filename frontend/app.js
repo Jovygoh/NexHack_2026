@@ -366,11 +366,11 @@ function mapApiResponseToContract(apiResponse, file) {
   const extractedTitle = extractDocumentTitle(rawText);
 
   return {
-    id:       Date.now(),
-    filename: apiResponse.file_name || file.name,
-    company:  '—',        // backend doesn't extract company name; can be added later
-    date,
-    time,
+    id:       apiResponse.id || Date.now(),
+    filename: apiResponse.file_name || (file ? file.name : ''),
+    company:  apiResponse.company || '—',
+    date:     apiResponse.date || date,
+    time:     apiResponse.time || time,
     status:   overallStatus,
     title:    extractedTitle, // may be '' — renderer hides the title row when empty
     subtitle: '',
@@ -632,11 +632,11 @@ function resetScanner() {
 }
 
 // ═══════════════════════════════════════════
-// HISTORY — persisted in localStorage so scans survive page refresh
+// HISTORY — persisted in SQLite database, falling back to localStorage/seed data
 // ═══════════════════════════════════════════
 const HISTORY_STORAGE_KEY = 'contractsense_scan_history_v1';
 
-function loadScanHistory() {
+function loadLocalScanHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
     if (raw) {
@@ -646,21 +646,53 @@ function loadScanHistory() {
   } catch (e) {
     console.error('Failed to load scan history from localStorage:', e);
   }
-  // First-ever visit (or corrupted storage) — seed with the demo contracts
   return [...CONTRACTS];
 }
 
-function saveScanHistory() {
+function saveLocalScanHistory() {
   try {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(SCAN_HISTORY));
   } catch (e) {
-    // Storage can fail if quota is exceeded (very large contracts/history) —
-    // don't crash the app, just warn in console.
     console.error('Failed to save scan history to localStorage:', e);
   }
 }
 
-let SCAN_HISTORY = loadScanHistory();
+let SCAN_HISTORY = loadLocalScanHistory();
+
+async function loadScanHistory() {
+  const btn = document.getElementById('btn-refresh-history');
+  if (btn) btn.textContent = '🔄 Syncing...';
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/history`);
+    if (res.ok) {
+      const dbHistory = await res.json();
+      if (dbHistory && dbHistory.length > 0) {
+        SCAN_HISTORY = dbHistory;
+      } else {
+        SCAN_HISTORY = loadLocalScanHistory();
+      }
+    } else {
+      SCAN_HISTORY = loadLocalScanHistory();
+    }
+  } catch (err) {
+    console.error('Failed to fetch history from database:', err);
+    SCAN_HISTORY = loadLocalScanHistory();
+  }
+  
+  buildHistoryList();
+  updateAutomatedScansCount();
+  
+  if (btn) {
+    btn.textContent = '🔄 Refresh list';
+  }
+}
+
+function updateAutomatedScansCount() {
+  const count = SCAN_HISTORY.filter(c => c.is_automated).length;
+  const el = document.getElementById('automated-scans-count');
+  if (el) el.textContent = count;
+}
 
 function buildHistoryList(filter = 'all') {
   const body = document.getElementById('history-table-body');
@@ -673,7 +705,10 @@ function buildHistoryList(filter = 'all') {
       <span><div class="status-badge ${c.status}">${
         c.status === 'safe' ? '✓ Safe' : c.status === 'issues' ? '⚠ Issues' : '✕ Critical'
       }</div></span>
-      <span><button class="view-btn" onclick="openHistoryDetail(${c.id})">View</button></span>
+      <span style="display:flex;gap:4px">
+        <button class="view-btn" onclick="openHistoryDetail(${c.id})">View</button>
+        <button class="view-btn" style="border-color:var(--red);color:var(--red)" onclick="deleteHistoryItem(${c.id}, event)">✕</button>
+      </span>
     </div>
   `).join('');
 }
@@ -684,17 +719,108 @@ function filterHistory(btn, filter) {
   buildHistoryList(filter);
 }
 
-function clearScanHistory() {
-  if (!confirm('Clear all scan history? This cannot be undone.')) return;
-  SCAN_HISTORY = [];
-  saveScanHistory();
-  buildHistoryList();
+async function clearScanHistory() {
+  if (!confirm('Clear all scan history from database? This cannot be undone.')) return;
+  try {
+    await fetch(`${API_BASE}/api/history`, { method: 'DELETE' });
+    SCAN_HISTORY = [];
+    localStorage.removeItem(HISTORY_STORAGE_KEY);
+    buildHistoryList();
+    updateAutomatedScansCount();
+  } catch (err) {
+    console.error('Failed to clear history:', err);
+    alert('Failed to clear database history.');
+  }
 }
 
-function openHistoryDetail(id) {
+async function deleteHistoryItem(id, event) {
+  if (event) event.stopPropagation();
+  if (!confirm('Delete this contract scan from database?')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/history/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    
+    SCAN_HISTORY = SCAN_HISTORY.filter(c => c.id !== id);
+    const localSaved = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (localSaved) {
+      const parsed = JSON.parse(localSaved);
+      const updated = parsed.filter(c => c.id !== id);
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updated));
+    }
+    
+    buildHistoryList();
+    updateAutomatedScansCount();
+  } catch (err) {
+    console.error('Failed to delete history item:', err);
+    alert('Failed to delete item from database.');
+  }
+}
+
+async function triggerAutoScan() {
+  const btn = document.getElementById('btn-trigger-scan');
+  const statusText = document.getElementById('auto-status-text');
+  
+  if (btn) btn.disabled = true;
+  if (statusText) statusText.textContent = 'Scanning auto_import folder...';
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/automation/scan`, { method: 'POST' });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const data = await res.json();
+    
+    if (statusText) {
+      statusText.textContent = `Active · Monitoring folders (${data.imported_count} new contracts imported)`;
+    }
+    
+    await loadScanHistory();
+    
+    setTimeout(() => {
+      if (statusText) statusText.textContent = 'Active · Monitoring folders';
+    }, 4000);
+    
+  } catch (err) {
+    console.error('Automation trigger failed:', err);
+    if (statusText) statusText.textContent = 'Active · Folder scan failed';
+    setTimeout(() => {
+      if (statusText) statusText.textContent = 'Active · Monitoring folders';
+    }, 4000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function openHistoryDetail(id) {
   toggleSeverityFilter(null, 'history');
-  const contract = SCAN_HISTORY.find(c => c.id === id);
+  
+  let contract = SCAN_HISTORY.find(c => c.id === id);
   if (!contract) return;
+
+  // Load detailed scan results if they are not in memory
+  if (!contract.sections) {
+    const detailOverlay = document.getElementById('history-detail');
+    const titleEl = document.getElementById('hd-title');
+    if (titleEl) titleEl.textContent = 'Loading details...';
+    if (detailOverlay) detailOverlay.classList.add('show');
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/history/${id}`);
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const dbDetail = await res.json();
+      
+      const mapped = mapApiResponseToContract(dbDetail, { name: dbDetail.file_name });
+      mapped.id = id; // preserve DB id
+      
+      const idx = SCAN_HISTORY.findIndex(c => c.id === id);
+      if (idx !== -1) {
+        SCAN_HISTORY[idx] = mapped;
+      }
+      contract = mapped;
+    } catch (err) {
+      console.error('Failed to load contract details:', err);
+      if (titleEl) titleEl.textContent = 'Error loading details';
+      return;
+    }
+  }
 
   _activeContract = contract;
   _chatHistory = []; // fresh conversation context for this contract
@@ -774,6 +900,7 @@ function closeHistoryDetail() {
   _activeContract = null;
   document.getElementById('history-detail').classList.remove('show');
 }
+
 
 // ═══════════════════════════════════════════
 // AI CHAT
@@ -1017,7 +1144,7 @@ function renderMarkdown(text) {
 // ═══════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════
-buildHistoryList();
+loadScanHistory();
 
 // ═══════════════════════════════════════════
 // SEVERITY STATUS CHIP FILTERING

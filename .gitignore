@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 *.log
 frontend_source/
+*.db
+backend/data/auto_import/*
+!backend/data/auto_import/.gitkeep
+backend/data/auto_import/processed/*
+!backend/data/auto_import/processed/.gitkeep

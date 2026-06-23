@@ -224,20 +224,50 @@ To run ContractSense on your local machine:
    ```bash
    pip install -r requirements.txt
    ```
-4. Copy `.env.example` to `.env` and insert your `OPENAI_API_KEY`:
-   ```bash
-   # Adjust environment variables as needed
-   ```
+4. Copy `.env.example` to `.env` and configure your variables:
+   - To use **Gemini API** (Pro/Free key), add:
+     ```env
+     GEMINI_API_KEY=your_gemini_api_key
+     GEMINI_MODEL=gemini-1.5-flash   # or gemini-1.5-pro for advanced logic
+     ```
+   - To use **OpenAI API**, add:
+     ```env
+     OPENAI_API_KEY=your_openai_api_key
+     OPENAI_MODEL=gpt-4o-mini
+     ```
+   - To use a **Cloud Database (Supabase / PostgreSQL)**, add:
+     ```env
+     DATABASE_URL=postgresql://postgres:[password]@db.supabase.co:5432/postgres
+     ```
+     *(If `DATABASE_URL` is left empty, the application automatically defaults to a local SQLite database stored at `backend/data/contractsense.db`.)*
+
 5. Run the FastAPI development server:
    ```bash
    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    ```
+
 ### 2. Run the Frontend
 1. Open the `/frontend` directory.
-2. Double-click [index.html](file:///c:/Users/USER/OneDrive%20-%20Universiti%20Tunku%20Abdul%20Rahman/Documents/NexHack2026/frontend/index.html) to open the web app directly in your browser.
+2. Double-click [index.html](file:///c:/Users/gohxu/Downloads/NexHack_2026-1/frontend/index.html) to open the web app directly in your browser.
 3. *Alternative (using a local dev server)*:
    ```powershell
    # In frontend folder:
    npx serve .
    ```
-4. Upload a contract, select the laws you'd like to check it against, and start scanning!
+
+---
+
+## 🤖 Automated Intake Watcher Instructions
+ContractSense includes an automated contract screening watcher that monitors a directory and imports contracts without manual user intervention.
+
+### How to use folder intake:
+1. Locate or create the import folder: `backend/data/auto_import/`.
+2. Place contract files (`.pdf`, `.docx`, `.doc`) into this folder.
+3. The background watcher loop checks this folder every 10 seconds.
+4. Once detected, the contract is:
+   - Extracted, scanned, and compliance-scored.
+   - Saved permanently in the database (SQLite or Supabase/PostgreSQL).
+   - Moved to the archive folder: `backend/data/auto_import/processed/`.
+5. Open the **History** tab in the web UI. You will see the new contract scans loaded directly from the database under the **Automated Intake** dashboard, complete with their extracted company names, risk scores, and statuses.
+6. Click **View** to inspect details, redline suggestions, and PDF coordinate highlights.
+

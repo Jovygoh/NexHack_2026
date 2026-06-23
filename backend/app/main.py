@@ -14,10 +14,18 @@ from app.services.risk_rules import analyze_text, calculate_risk_score, risk_lev
 from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
 from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
+from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts
+from app.services.automation import start_automation_watcher, process_incoming_contracts, AUTO_IMPORT_DIR, AUTO_IMPORT_PROCESSED_DIR
+
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
-#app.mount("/static", StaticFiles(directory="static"), name="static")
-# Paste your production Vercel URL here
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
+    AUTO_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+    AUTO_IMPORT_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    start_automation_watcher()
 
 # CORS Setup
 app.add_middleware(
@@ -148,7 +156,41 @@ async def analyze_contract(
             # results, just without PDF-native highlighting.
             print(f"PDF coordinate extraction failed: {e}")
 
+    # Save the scanned contract to the database
+    db_findings = [f.model_dump() for f in findings]
+    db_llm_review = llm_review.model_dump() if llm_review else None
+    db_page_sizes = [{"width": s.width, "height": s.height} for s in page_sizes_out] if page_sizes_out else None
+    db_highlight_boxes = [
+        {
+            "finding_id": b.finding_id,
+            "page": b.page,
+            "x0": b.x0,
+            "x1": b.x1,
+            "top": b.top,
+            "bottom": b.bottom,
+            "severity": b.severity
+        } for b in highlight_boxes_out
+    ] if highlight_boxes_out else None
+
+    contract_record = {
+        "file_name": file.filename or "uploaded-contract",
+        "summary": summary,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "findings": db_findings,
+        "llm_review": db_llm_review,
+        "contract_text": contract_text,
+        "pdf_base64": pdf_base64,
+        "page_sizes": db_page_sizes,
+        "highlight_boxes": db_highlight_boxes,
+        "is_automated": False
+    }
+    
+    db_id = save_contract(contract_record)
+    db_contract = get_contract_by_id(db_id)
+
     return ContractAnalysisResponse(
+        id=db_id,
         file_name=file.filename or "uploaded-contract",
         summary=summary,
         risk_score=risk_score,
@@ -159,6 +201,10 @@ async def analyze_contract(
         pdf_base64=pdf_base64,
         page_sizes=page_sizes_out,
         highlight_boxes=highlight_boxes_out,
+        company=db_contract.get("company") if db_contract else "—",
+        date=db_contract.get("date") if db_contract else None,
+        time=db_contract.get("time") if db_contract else None,
+        is_automated=False
     )
 
 @app.get("/api/reference/files")
@@ -245,3 +291,66 @@ async def chat_endpoint(request: ChatRequest):
     )
     
     return {"reply": reply}
+
+
+@app.get("/api/history")
+def get_history():
+    try:
+        return get_all_contracts()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database query failed: {str(e)}"
+        )
+
+@app.get("/api/history/{id}", response_model=ContractAnalysisResponse)
+def get_history_detail(id: int):
+    try:
+        contract = get_contract_by_id(id)
+        if not contract:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Contract scan with ID {id} not found."
+            )
+        return contract
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database query failed: {str(e)}"
+        )
+
+@app.delete("/api/history/{id}")
+def delete_history_item(id: int):
+    try:
+        delete_contract(id)
+        return {"status": "ok", "message": f"Deleted contract {id}"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Delete failed: {str(e)}"
+        )
+
+@app.delete("/api/history")
+def clear_history():
+    try:
+        clear_all_contracts()
+        return {"status": "ok", "message": "All history cleared"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Clear failed: {str(e)}"
+        )
+
+@app.post("/api/automation/scan")
+async def trigger_automation():
+    try:
+        new_records = await process_incoming_contracts()
+        return {"status": "ok", "imported_count": len(new_records), "records": new_records}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Folder scan failed: {str(e)}"
+        )
+

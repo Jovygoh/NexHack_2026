@@ -35,6 +35,7 @@ class HighlightBoxOut(BaseModel):
     severity: RiskLevel
 
 class ContractAnalysisResponse(BaseModel):
+    id: int | None = None
     file_name: str
     summary: str
     risk_score: int = Field(ge=0, le=100)
@@ -49,3 +50,7 @@ class ContractAnalysisResponse(BaseModel):
     pdf_base64: str | None = None
     page_sizes: list[PageSize] | None = None
     highlight_boxes: list[HighlightBoxOut] | None = None
+    company: str | None = None
+    date: str | None = None
+    time: str | None = None
+    is_automated: bool | None = None

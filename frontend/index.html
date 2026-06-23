@@ -148,6 +148,41 @@
   <div class="history-wrap">
     <div class="page-title">Scan history</div>
     <div class="page-sub">All previous contract scans. Click a contract name to view the full result.</div>
+    
+    <!-- Automated Intake Dashboard -->
+    <div class="automation-dashboard">
+      <div class="auto-header">
+        <div class="auto-title">
+          <div class="auto-icon">🤖</div>
+          <div>
+            <h3>Automated Contract Intake</h3>
+            <div class="auto-status">
+              <span class="pulse-dot"></span>
+              <span class="status-text" id="auto-status-text">Active · Monitoring folders</span>
+            </div>
+          </div>
+        </div>
+        <div class="auto-actions">
+          <button class="filter-btn btn-sm" id="btn-trigger-scan" onclick="triggerAutoScan()">⚡ Scan folder now</button>
+          <button class="filter-btn btn-sm" id="btn-refresh-history" onclick="loadScanHistory()">🔄 Refresh list</button>
+        </div>
+      </div>
+      <div class="auto-grid">
+        <div class="auto-metric">
+          <span class="metric-label">Import Folder</span>
+          <span class="metric-valcode">backend/data/auto_import/</span>
+        </div>
+        <div class="auto-metric">
+          <span class="metric-label">Processed Archive</span>
+          <span class="metric-valcode">backend/data/auto_import/processed/</span>
+        </div>
+        <div class="auto-metric">
+          <span class="metric-label">Automated Scans</span>
+          <span class="metric-val" id="automated-scans-count">0</span>
+        </div>
+      </div>
+    </div>
+
     <div class="history-filters">
       <button class="filter-btn active" onclick="filterHistory(this,'all')">All</button>
       <button class="filter-btn" onclick="filterHistory(this,'safe')">Safe</button>

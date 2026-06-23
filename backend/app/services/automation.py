@@ -1,0 +1,176 @@
+import asyncio
+import os
+import shutil
+import base64
+from datetime import datetime
+from pathlib import Path
+from app.config import get_settings
+from app.services.text_extraction import extract_text_from_bytes
+from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
+from app.services.risk_rules import analyze_text, calculate_risk_score, risk_level_from_score
+from app.services.llm_review import review_with_llm
+from app.db import save_contract, get_contract_by_id
+
+DATA_DIR = Path("data")
+AUTO_IMPORT_DIR = DATA_DIR / "auto_import"
+AUTO_IMPORT_PROCESSED_DIR = AUTO_IMPORT_DIR / "processed"
+
+# Semaphore to prevent multiple scans running at the same time
+_scan_lock = asyncio.Lock()
+
+async def process_incoming_contracts() -> list[dict]:
+    """
+    Checks AUTO_IMPORT_DIR for PDF/DOCX files, runs compliance checks,
+    saves results to the database, and moves processed files.
+    Returns a list of newly imported contract database records.
+    """
+    if _scan_lock.locked():
+        return []
+        
+    async with _scan_lock:
+        new_contracts = []
+        if not AUTO_IMPORT_DIR.exists():
+            return []
+            
+        for filepath in AUTO_IMPORT_DIR.glob("*"):
+            if not filepath.is_file():
+                continue
+            ext = filepath.suffix.lower()
+            if ext not in {".pdf", ".docx", ".txt", ".md"}:
+                continue
+                
+            try:
+                # Check if file size is stable (ensuring it's fully written)
+                prev_size = filepath.stat().st_size
+                await asyncio.sleep(0.5)
+                if filepath.stat().st_size != prev_size:
+                    continue
+                    
+                content = filepath.read_bytes()
+            except Exception as e:
+                print(f"Skipping {filepath.name}, cannot read file: {e}")
+                continue
+                
+            print(f"Auto-import scanner: processing {filepath.name}...")
+            try:
+                contract_text = extract_text_from_bytes(content, ext)
+                if not contract_text.strip():
+                    print(f"Auto-import scanner: empty text in {filepath.name}")
+                    # Move to processed folder as failed
+                    dest_path = AUTO_IMPORT_PROCESSED_DIR / f"failed_empty_{filepath.name}"
+                    shutil.move(str(filepath), str(dest_path))
+                    continue
+                    
+                # Run rule analyzer
+                findings = analyze_text(contract_text)
+                risk_score = calculate_risk_score(findings)
+                risk_level = risk_level_from_score(risk_score)
+                
+                # Load reference text (laws & policies)
+                from app.main import _load_reference_text, LAWS_DIR, POLICIES_DIR
+                laws_text = _load_reference_text(LAWS_DIR)
+                policies_text = _load_reference_text(POLICIES_DIR)
+                
+                # Run LLM review (async)
+                settings = get_settings()
+                llm_review = await review_with_llm(
+                    api_key=settings.openai_api_key,
+                    model=settings.openai_model,
+                    gemini_api_key=settings.gemini_api_key,
+                    gemini_model=settings.gemini_model,
+                    contract_text=contract_text,
+                    findings=findings,
+                    jurisdiction="Malaysia",
+                    language="English",
+                    laws_text=laws_text,
+                    policies_text=policies_text,
+                )
+                
+                pdf_base64 = None
+                page_sizes_out = None
+                highlight_boxes_out = None
+                if ext == ".pdf":
+                    try:
+                        extraction = extract_pdf_with_coords(content)
+                        pdf_base64 = base64.b64encode(content).decode("ascii")
+                        page_sizes_out = [{"width": w, "height": h} for (w, h) in extraction.page_sizes]
+                        
+                        boxes = []
+                        for finding in findings:
+                            if finding.severity == "low":
+                                continue
+                            query_excerpt = finding.matched_snippet or finding.excerpt
+                            matched = match_excerpt_to_boxes(extraction, query_excerpt, finding.severity)
+                            for box in matched:
+                                boxes.append({
+                                    "finding_id": finding.id,
+                                    "page": box.page,
+                                    "x0": box.x0,
+                                    "x1": box.x1,
+                                    "top": box.top,
+                                    "bottom": box.bottom,
+                                    "severity": box.severity,
+                                })
+                        highlight_boxes_out = boxes
+                    except Exception as coord_err:
+                        print(f"PDF coord extraction failed during auto-import: {coord_err}")
+                
+                # Save to database
+                db_findings = [f.model_dump() for f in findings]
+                db_llm_review = llm_review.model_dump() if llm_review else None
+                
+                contract_record = {
+                    "file_name": filepath.name,
+                    "summary": f"Found {len(findings)} potential compliance issues." if findings else "No compliance issues detected.",
+                    "risk_score": risk_score,
+                    "risk_level": risk_level,
+                    "findings": db_findings,
+                    "llm_review": db_llm_review,
+                    "contract_text": contract_text,
+                    "pdf_base64": pdf_base64,
+                    "page_sizes": page_sizes_out,
+                    "highlight_boxes": highlight_boxes_out,
+                    "is_automated": True
+                }
+                
+                db_id = save_contract(contract_record)
+                
+                # Retrieve final record
+                db_record = get_contract_by_id(db_id)
+                if db_record:
+                    new_contracts.append(db_record)
+                    
+                # Move file to processed folder
+                dest_path = AUTO_IMPORT_PROCESSED_DIR / filepath.name
+                if dest_path.exists():
+                    stem = filepath.stem
+                    suffix = filepath.suffix
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    dest_path = AUTO_IMPORT_PROCESSED_DIR / f"{stem}_{timestamp}{suffix}"
+                shutil.move(str(filepath), str(dest_path))
+                print(f"Auto-import scanner: successfully imported {filepath.name} (DB ID: {db_id})")
+                
+            except Exception as scan_err:
+                print(f"Error processing {filepath.name} in auto-import: {scan_err}")
+                try:
+                    dest_path = AUTO_IMPORT_PROCESSED_DIR / f"failed_error_{filepath.name}"
+                    shutil.move(str(filepath), str(dest_path))
+                except Exception as move_err:
+                    print(f"Could not move failed file {filepath.name}: {move_err}")
+                    
+        return new_contracts
+
+async def _watcher_loop():
+    print("Auto-import watcher loop started.")
+    # Wait a few seconds on startup before first check
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await process_incoming_contracts()
+        except Exception as err:
+            print(f"Error in watcher loop: {err}")
+        await asyncio.sleep(10)
+
+def start_automation_watcher():
+    loop = asyncio.get_event_loop()
+    loop.create_task(_watcher_loop())
