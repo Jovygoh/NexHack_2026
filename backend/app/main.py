@@ -411,4 +411,53 @@ def disconnect_email_inbox():
             detail=f"Failed to disconnect: {str(e)}"
         )
 
+@app.get("/api/test-imap")
+def test_imap_endpoint():
+    logs = []
+    logs.append("Starting IMAP test...")
+    
+    config = get_email_config()
+    if not config:
+        return {"status": "error", "message": "No config in database", "logs": logs}
+        
+    logs.append(f"Config found: {config['email_address']} on {config['imap_server']}:{config['imap_port']}")
+    
+    import imaplib
+    import socket
+    
+    # Set socket timeout
+    socket.setdefaulttimeout(10)
+    logs.append("Socket timeout set to 10s")
+    
+    try:
+        logs.append("Connecting to IMAP server...")
+        mail = imaplib.IMAP4_SSL(config["imap_server"], config["imap_port"])
+        logs.append("Connected! Logging in...")
+        
+        mail.login(config["email_address"], config["email_password"])
+        logs.append("Logged in successfully! Selecting inbox...")
+        
+        status, messages = mail.select("inbox")
+        logs.append(f"Inbox select status: {status}, message count: {messages[0].decode('utf-8') if isinstance(messages[0], bytes) else messages[0]}")
+        
+        status, search_res = mail.search(None, "UNSEEN")
+        logs.append(f"Search UNSEEN status: {status}")
+        
+        if status == "OK" and search_res[0]:
+            email_ids = search_res[0].split()
+            logs.append(f"Found {len(email_ids)} unread emails.")
+            for email_id in email_ids:
+                logs.append(f"Message ID: {email_id.decode('utf-8') if isinstance(email_id, bytes) else email_id}")
+        else:
+            logs.append("No unread emails found.")
+            
+        mail.logout()
+        logs.append("Logged out.")
+        return {"status": "success", "logs": logs}
+        
+    except Exception as e:
+        logs.append(f"Error during IMAP operations: {str(e)}")
+        return {"status": "error", "logs": logs}
+
+
 
