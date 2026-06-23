@@ -950,13 +950,35 @@ async function openHistoryDetail(id) {
   let contract = SCAN_HISTORY.find(c => c.id === id);
   if (!contract) return;
 
+  // Clear previous details and show premium loading state immediately
+  document.getElementById('hd-title').textContent = 'Generating compliance report...';
+  
+  // Fill exactly 3 dummy elements to satisfy children[0]/[1]/[2] references safely before real rendering
+  document.getElementById('hd-chips').innerHTML = '<div class="chip">...</div><div class="chip">...</div><div class="chip">...</div>';
+  document.getElementById('hd-issue-chips').innerHTML = '';
+  
+  document.getElementById('history-issues-list').innerHTML = `
+    <div class="loading-indicator loading-indicator-pulse">
+      <div class="spinner"></div>
+      <div>Analysing contract clauses...</div>
+    </div>
+  `;
+  document.getElementById('history-pdf-viewer').innerHTML = `
+    <div class="loading-indicator">
+      <div class="spinner"></div>
+      <div>Rendering document layout...</div>
+    </div>
+  `;
+  document.getElementById('history-page-content').innerHTML = '';
+  document.getElementById('history-page-content').style.display = 'none';
+  document.getElementById('history-pdf-viewer').style.display = 'flex';
+  document.getElementById('history-suggestion-box').classList.add('collapsed');
+
+  const detailOverlay = document.getElementById('history-detail');
+  if (detailOverlay) detailOverlay.classList.add('show');
+
   // Load detailed scan results if they are not in memory
   if (!contract.sections) {
-    const detailOverlay = document.getElementById('history-detail');
-    const titleEl = document.getElementById('hd-title');
-    if (titleEl) titleEl.textContent = 'Loading details...';
-    if (detailOverlay) detailOverlay.classList.add('show');
-    
     try {
       const res = await fetch(`${API_BASE}/api/history/${id}`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -972,7 +994,17 @@ async function openHistoryDetail(id) {
       contract = mapped;
     } catch (err) {
       console.error('Failed to load contract details:', err);
-      if (titleEl) titleEl.textContent = 'Error loading details';
+      document.getElementById('hd-title').textContent = 'Error Loading Report';
+      document.getElementById('history-issues-list').innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; color: var(--red)">
+          ✕ Failed to load contract details.
+        </div>
+      `;
+      document.getElementById('history-pdf-viewer').innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; color: var(--text3)">
+          Please close and try again.
+        </div>
+      `;
       return;
     }
   }

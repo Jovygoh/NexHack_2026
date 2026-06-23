@@ -553,4 +553,31 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
   color: var(--red);
 }
 
-
+/* Loading States */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+.loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--text3);
+  font-size: 13px;
+  width: 100%;
+  text-align: center;
+}
+.loading-indicator-pulse {
+  animation: pulse 1.8s infinite ease-in-out;
+}
