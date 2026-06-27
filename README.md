@@ -1,7 +1,6 @@
 # 🔍 ContractSense — AI-Powered Contract Compliance Scanner
 > **Official Submission Assets**  
-> 📂 **[Read the Pitch Deck (GitHub Markdown)](./pitch_deck.md)**  
-> 📺 **[Launch Interactive Presentation Slides](./presentation_slides.html)**  
+> 📺 **[Launch Interactive Presentation Slides]([./presentation_slides.html](https://heyzine.com/flip-book/b9c4379e07.html))**  
 > 
 > *Empowering Malaysian SMEs, HR professionals, and Legal teams to screen, flag, and remediate contract compliance risks in under 30 seconds.*
 
