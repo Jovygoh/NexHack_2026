@@ -19,6 +19,8 @@ class RiskRule:
     patterns: tuple[str, ...]
     explanation: str
     recommendation: str
+    law_section: str
+    rewrite: str
 
 
 RISK_RULES: tuple[RiskRule, ...] = (
@@ -30,6 +32,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         patterns=(r"material changes", r"substantial modifications"),
         explanation="The contract may allow significant changes to its terms.",
         recommendation="Require written notice, mutual consent, and a right to terminate if material terms change.",
+        law_section="Contracts Act 1950 (Section 10)",
+        rewrite="Any changes to the material terms of this Agreement shall be in writing and mutually agreed upon by both Parties.",
     ),
     RiskRule(
         id="unilateral-change",
@@ -44,6 +48,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="The contract allows one party to unilaterally modify terms or pricing without the other's consent.",
         recommendation="Require mutual written consent for all modifications and price changes.",
+        law_section="Contracts Act 1950 (Section 10 & 13)",
+        rewrite="No modification to this Agreement or adjustment to pricing shall be valid unless made in writing and signed by the authorized representatives of both Parties.",
     ),
     RiskRule(
         id="auto-renewal",
@@ -58,6 +64,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="The agreement will automatically renew unless a party gives notice to terminate before the deadline.",
         recommendation="Ensure the notice period for non-renewal is reasonable (e.g., 30-90 days) and track the deadline.",
+        law_section="Contracts Act 1950 (Section 6 & 7)",
+        rewrite="This Agreement shall not automatically renew. Any renewal must be mutually agreed in writing by both Parties at least 30 days prior to the expiration of the current term.",
     ),
     RiskRule(
         id="hidden-fees",
@@ -71,6 +79,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="The contract may allow extra charges beyond the headline price.",
         recommendation="List all charge categories, caps, approval requirements, and invoice dispute rights.",
+        law_section="Contracts Act 1950 (Section 10)",
+        rewrite="No additional administrative fees, pass-through charges, or extra costs shall be charged unless explicitly specified in this Agreement or agreed in writing.",
     ),
     RiskRule(
         id="broad-liability-waiver",
@@ -84,6 +94,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="Liability may be excluded or capped too broadly for enterprise risk tolerance.",
         recommendation="Carve out fraud, confidentiality, data breach, IP infringement, and gross negligence.",
+        law_section="Contracts Act 1950 (Section 29)",
+        rewrite="Neither Party excludes or limits its liability for fraud, gross negligence, intellectual property infringement, or breach of confidentiality.",
     ),
     RiskRule(
         id="data-use",
@@ -96,6 +108,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="The vendor may use, share, or transfer enterprise/customer data broadly.",
         recommendation="Limit data use to service delivery, require data processing terms, and define retention/deletion duties.",
+        law_section="PDPA 2010 (Section 6 - General Principle)",
+        rewrite="The processing of personal data shall be limited strictly to the performance of the services, and shall not be shared with third parties without prior written consent.",
     ),
     RiskRule(
         id="exclusive-remedy",
@@ -107,6 +121,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="Available remedies may be narrowed even when business harm is larger.",
         recommendation="Preserve injunctive relief, statutory rights, and remedies for severe breaches.",
+        law_section="Contracts Act 1950 (Section 29)",
+        rewrite="The remedies set forth in this Agreement are cumulative and in addition to, not in lieu of, any other remedies available at law or in equity.",
     ),
     RiskRule(
         id="ambiguous-incorporation",
@@ -119,6 +135,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="Important terms may live outside the uploaded contract and change later.",
         recommendation="Attach referenced terms as exhibits and freeze the applicable version at signature.",
+        law_section="Contracts Act 1950 (Section 30)",
+        rewrite="Terms incorporated by external reference are frozen as of the date of signature and cannot be unilaterally updated by either Party.",
     ),
     # --- NDA / confidentiality-specific rules ---
     RiskRule(
@@ -132,6 +150,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="Defining confidential information to include publicly available or independently developed information is overbroad and may be unenforceable.",
         recommendation="Limit the definition to non-public information that is marked confidential or reasonably understood to be confidential, with standard carve-outs (public domain, independently developed, already known).",
+        law_section="Contracts Act 1950 (Section 28)",
+        rewrite="Confidential Information shall not include information that is publicly known, already possessed by the receiving party, or independently developed.",
     ),
     RiskRule(
         id="indefinite-duration",
@@ -144,6 +164,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="Obligations with no time limit are commercially unusual and may be struck down by courts as an unreasonable restraint.",
         recommendation="Specify a fixed term (commonly 2-5 years for confidentiality) after which obligations lapse, unless renewed by agreement.",
+        law_section="Contracts Act 1950 (Section 28)",
+        rewrite="The obligations of confidentiality under this Agreement shall survive the termination or expiration of this Agreement for a period of three (3) years.",
     ),
     RiskRule(
         id="no-legal-disclosure-carveout",
@@ -156,6 +178,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="A clause that prohibits disclosure even when required by law, court order, or regulator is unenforceable and may expose a party to contempt of court if relied upon.",
         recommendation="Add a standard carve-out permitting disclosure required by law or valid court/regulatory order, with prior notice to the other party where legally permitted.",
+        law_section="Contracts Act 1950 (Section 29)",
+        rewrite="A receiving party may disclose Confidential Information if required by law or court order, provided it gives prompt written notice to the disclosing party.",
     ),
     RiskRule(
         id="disproportionate-penalty",
@@ -169,6 +193,8 @@ RISK_RULES: tuple[RiskRule, ...] = (
         ),
         explanation="A fixed damages amount unrelated to actual loss may be treated as an unenforceable penalty rather than a genuine pre-estimate of loss under contract law.",
         recommendation="Tie liquidated damages to a reasonable pre-estimate of loss, or rely on general damages assessed by a court instead of a large fixed figure.",
+        law_section="Contracts Act 1950 (Section 75)",
+        rewrite="Any damages for breach of contract shall be limited to actual, proven losses, up to a reasonable pre-estimate of loss.",
     ),
 )
 
@@ -206,6 +232,8 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         recommendation=matched_rule.recommendation,
                         line_number=None,
                         matched_snippet=excerpt,
+                        law_section=matched_rule.law_section,
+                        rewrite=matched_rule.rewrite,
                     )
                 )
             else:
@@ -223,6 +251,8 @@ def analyze_text(text: str) -> list[ClauseFinding]:
                         recommendation="",
                         line_number=None,
                         matched_snippet=None,
+                        law_section=None,
+                        rewrite=None,
                     )
                 )
 

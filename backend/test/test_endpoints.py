@@ -78,3 +78,40 @@ def test_chat_endpoint_no_key() -> None:
     reply = response.json()["reply"]
     assert "ContractSense AI" in reply
     assert "scanned contract" in reply
+
+def test_search_and_edit_endpoints() -> None:
+    from app.db import init_db, clear_all_contracts, save_contract, get_contract_by_id
+    init_db()
+    clear_all_contracts()
+    
+    c_id = save_contract({
+        "file_name": "gamma_agreement.pdf",
+        "company": "Gamma Ltd",
+        "risk_level": "low",
+        "contract_text": "This is Gamma contract details."
+    })
+    
+    # Test api search matching
+    response = client.get("/api/history?search=gamma")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["filename"] == "gamma_agreement.pdf"
+    
+    # Test api search not matching
+    response = client.get("/api/history?search=nonexistent")
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+    
+    # Test api update text
+    payload = {"contract_text": "This is the updated Gamma contract text."}
+    response = client.post(f"/api/history/{c_id}/text", json=payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    
+    # Verify update in db
+    rec = get_contract_by_id(c_id)
+    assert rec["contract_text"] == "This is the updated Gamma contract text."
+    
+    # Cleanup
+    from app.db import delete_contract
+    delete_contract(c_id)

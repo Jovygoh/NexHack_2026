@@ -294,13 +294,28 @@ async def chat_endpoint(request: ChatRequest):
 
 
 @app.get("/api/history")
-def get_history():
+def get_history(search: str | None = None):
     try:
-        return get_all_contracts()
+        return get_all_contracts(search)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database query failed: {str(e)}"
+        )
+
+class UpdateTextRequest(BaseModel):
+    contract_text: str
+
+@app.post("/api/history/{id}/text")
+def update_contract_text_endpoint(id: int, request: UpdateTextRequest):
+    try:
+        from app.db import update_contract_text
+        update_contract_text(id, request.contract_text)
+        return {"status": "ok", "message": "Contract text updated successfully."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update contract text: {str(e)}"
         )
 
 @app.get("/api/history/{id}", response_model=ContractAnalysisResponse)
