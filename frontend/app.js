@@ -158,6 +158,7 @@ function renderIssuesList(contract, issueListEl, chipOk, chipWarn, chipBad, sugg
 
   issueListEl.innerHTML = issues.map(c => {
     const safeId = (c.findingId || c.id).replace(/[^a-zA-Z0-9]/g, '_');
+    const lawText = c.law ? `${c.law} — ` : '';
     const descSnippet = (c.desc || '').substring(0, 90);
     return `
       <div class="issue-item" id="${issueListEl.id}-issue-${safeId}"
@@ -168,7 +169,7 @@ function renderIssuesList(contract, issueListEl, chipOk, chipWarn, chipBad, sugg
           <div class="issue-badge ${c.status}">${c.id}</div>
           <div class="issue-name">${c.issue || ''}</div>
         </div>
-        <div class="issue-desc">${descSnippet}${descSnippet.length >= 90 ? '…' : ''}</div>
+        <div class="issue-desc">${lawText}${descSnippet}${descSnippet.length >= 90 ? '…' : ''}</div>
       </div>
     `;
   }).join('');
@@ -334,9 +335,10 @@ function mapApiResponseToContract(apiResponse, file) {
         text:       cleanText,
         status:     severityToStatus(f.severity),
         issue:      f.severity === 'low' ? null : f.title,
-        law:        null,
+        law:        f.law_section || null,
         desc:       f.explanation || null,
         suggestion: f.recommendation || null,
+        rewrite:    f.rewrite || null,
       };
     })
   }));
@@ -663,16 +665,22 @@ function saveLocalScanHistory() {
 
 let SCAN_HISTORY = loadLocalScanHistory();
 
-async function loadScanHistory(isSilent = false) {
+async function loadScanHistory(isSilent = false, searchQuery = '') {
   const btn = document.getElementById('btn-refresh-history');
   if (btn && !isSilent) btn.textContent = '🔄 Syncing...';
   
   try {
-    const res = await fetch(`${API_BASE}/api/history`);
+    let url = `${API_BASE}/api/history`;
+    if (searchQuery) {
+      url += `?search=${encodeURIComponent(searchQuery)}`;
+    }
+    const res = await fetch(url);
     if (res.ok) {
       const dbHistory = await res.json();
       if (dbHistory && dbHistory.length > 0) {
         SCAN_HISTORY = dbHistory;
+      } else if (searchQuery) {
+        SCAN_HISTORY = [];
       } else {
         SCAN_HISTORY = loadLocalScanHistory();
       }
@@ -690,6 +698,15 @@ async function loadScanHistory(isSilent = false) {
   if (btn && !isSilent) {
     btn.textContent = '🔄 Refresh list';
   }
+}
+
+let _historySearchTimeout = null;
+function onHistorySearch() {
+  clearTimeout(_historySearchTimeout);
+  _historySearchTimeout = setTimeout(async () => {
+    const query = document.getElementById('history-search-input').value.trim();
+    await loadScanHistory(false, query);
+  }, 300);
 }
 
 async function checkEmailConnectionStatus() {
@@ -1437,6 +1454,327 @@ function dismissSuggestion(context) {
   if (box) {
     box.classList.add('collapsed');
   }
+}
+
+// ═══════════════════════════════════════════
+// DOCUMENT EDITOR ROUTINES
+// ═══════════════════════════════════════════
+let _editorSourcePage = 'scanner'; // 'scanner' or 'history'
+let _editorIssues = [];
+let _editorWizardIndex = 0;
+let _editorMode = 'auto'; // 'auto' or 'manual'
+let _editorAppliedSuggestions = [];
+
+function openEditorFromScanner() {
+  if (!_activeContract) return;
+  _editorSourcePage = 'scanner';
+  openEditor();
+}
+
+function openEditorFromHistory() {
+  if (!_activeContract) return;
+  _editorSourcePage = 'history';
+  document.getElementById('history-detail').classList.remove('show');
+  openEditor();
+}
+
+function openEditor() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-editor').classList.add('active');
+  
+  document.getElementById('editor-filename').textContent = `Editing: ${_activeContract.filename}`;
+  
+  const paper = document.getElementById('editor-textarea');
+  const rawText = _activeContract.rawText || '';
+  
+  const paragraphs = rawText.split('\n').map(line => {
+    const clean = line.trim();
+    return `<p>${clean || '&nbsp;'}</p>`;
+  }).join('');
+  paper.innerHTML = paragraphs;
+  
+  makeResizable('editor-resize-divider', '.editor-sidebar');
+  
+  _editorIssues = [];
+  _activeContract.sections.forEach(sec => {
+    sec.clauses.forEach(c => {
+      if ((c.status === 'bad' || c.status === 'warn') && (c.rewrite || c.suggestion)) {
+        _editorIssues.push({
+          id: c.id,
+          findingId: c.findingId,
+          title: c.issue || 'Compliance Issue',
+          originalText: c.text.trim(),
+          rewrite: c.rewrite || c.suggestion,
+          law: c.law
+        });
+      }
+    });
+  });
+  
+  _editorWizardIndex = 0;
+  _editorAppliedSuggestions = [];
+  document.getElementById('applied-list').innerHTML = '';
+  
+  setEditMode('auto');
+  updateWizardUI();
+}
+
+function backToSourcePage() {
+  document.getElementById('page-editor').classList.remove('active');
+  if (_editorSourcePage === 'scanner') {
+    goPage('scanner');
+    if (_activeContract) {
+      showResults(_activeContract);
+    }
+  } else {
+    goPage('history');
+    if (_activeContract) {
+      openHistoryDetail(_activeContract.id);
+    }
+  }
+}
+
+function setEditMode(mode) {
+  _editorMode = mode;
+  document.getElementById('btn-mode-auto').classList.toggle('active', mode === 'auto');
+  document.getElementById('btn-mode-manual').classList.toggle('active', mode === 'manual');
+  
+  document.getElementById('pane-auto-edit').classList.toggle('active', mode === 'auto');
+  document.getElementById('pane-manual-review').classList.toggle('active', mode === 'manual');
+  
+  if (mode === 'manual') {
+    highlightWizardClause();
+  } else {
+    removeWizardHighlight();
+  }
+}
+
+function updateWizardUI() {
+  const wizard = document.getElementById('review-wizard');
+  const noIssues = document.getElementById('editor-no-issues');
+  
+  if (_editorIssues.length === 0 || _editorWizardIndex >= _editorIssues.length) {
+    wizard.style.display = 'none';
+    noIssues.style.display = 'block';
+    removeWizardHighlight();
+    return;
+  }
+  
+  wizard.style.display = 'block';
+  noIssues.style.display = 'none';
+  
+  const current = _editorIssues[_editorWizardIndex];
+  document.getElementById('wizard-step-label').textContent = `Issue ${_editorWizardIndex + 1} of ${_editorIssues.length}`;
+  document.getElementById('wizard-issue-title').textContent = `${current.title}`;
+  document.getElementById('wizard-original-text').textContent = current.originalText;
+  document.getElementById('wizard-rewrite-text').value = current.rewrite;
+  
+  if (_editorMode === 'manual') {
+    highlightWizardClause();
+  }
+}
+
+function highlightWizardClause() {
+  removeWizardHighlight();
+  
+  if (_editorWizardIndex >= _editorIssues.length) return;
+  const current = _editorIssues[_editorWizardIndex];
+  const textToFind = current.originalText;
+  if (!textToFind) return;
+  
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = paper.getElementsByTagName('p');
+  
+  for (let p of paragraphs) {
+    const text = (p.innerText || p.textContent).trim();
+    if (text.includes(textToFind) || textToFind.includes(text)) {
+      p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      p.style.outline = '2px solid var(--accent)';
+      p.style.borderRadius = '4px';
+      p.style.background = 'rgba(79, 142, 247, 0.05)';
+      p.setAttribute('data-wizard-hl', 'true');
+      break;
+    }
+  }
+}
+
+function removeWizardHighlight() {
+  const paper = document.getElementById('editor-textarea');
+  const elements = paper.querySelectorAll('[data-wizard-hl="true"]');
+  elements.forEach(el => {
+    el.style.outline = 'none';
+    el.style.background = 'none';
+    el.removeAttribute('data-wizard-hl');
+  });
+}
+
+function confirmWizardStep() {
+  if (_editorWizardIndex >= _editorIssues.length) return;
+  
+  const current = _editorIssues[_editorWizardIndex];
+  const editedRewrite = document.getElementById('wizard-rewrite-text').value.trim();
+  
+  if (!editedRewrite) return;
+  
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = paper.getElementsByTagName('p');
+  let replaced = false;
+  
+  for (let p of paragraphs) {
+    const text = (p.innerText || p.textContent).trim();
+    if (text.includes(current.originalText)) {
+      p.innerHTML = text.replace(current.originalText, editedRewrite);
+      p.setAttribute('data-wizard-hl', 'true');
+      replaced = true;
+      break;
+    } else if (current.originalText.includes(text)) {
+      p.innerHTML = editedRewrite;
+      p.setAttribute('data-wizard-hl', 'true');
+      replaced = true;
+      break;
+    }
+  }
+  
+  if (replaced) {
+    showReplacementAlert();
+  }
+  
+  _editorWizardIndex++;
+  updateWizardUI();
+}
+
+function skipWizardStep() {
+  _editorWizardIndex++;
+  updateWizardUI();
+}
+
+function showReplacementAlert() {
+  const paper = document.getElementById('editor-textarea');
+  const updated = paper.querySelector('[data-wizard-hl="true"]');
+  if (updated) {
+    updated.style.background = 'rgba(46, 204, 143, 0.2)';
+    setTimeout(() => {
+      updated.style.background = 'none';
+      updated.style.outline = 'none';
+      updated.removeAttribute('data-wizard-hl');
+    }, 800);
+  }
+}
+
+function applyAllSuggestions() {
+  if (_editorIssues.length === 0) {
+    alert('No compliance issues found to apply suggestions.');
+    return;
+  }
+  
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = paper.getElementsByTagName('p');
+  const listEl = document.getElementById('applied-list');
+  listEl.innerHTML = '';
+  
+  let count = 0;
+  
+  _editorIssues.forEach(issue => {
+    for (let p of paragraphs) {
+      const text = (p.innerText || p.textContent).trim();
+      if (text.includes(issue.originalText)) {
+        p.innerHTML = text.replace(issue.originalText, issue.rewrite);
+        
+        const logItem = document.createElement('div');
+        logItem.className = 'applied-item';
+        logItem.innerHTML = `
+          <div class="applied-item-top">✓ Applied: ${issue.title}</div>
+          <div class="applied-item-desc">Replaced unilateral/risky terms with compliant clause.</div>
+        `;
+        listEl.appendChild(logItem);
+        
+        count++;
+        break;
+      } else if (issue.originalText.includes(text)) {
+        p.innerHTML = issue.rewrite;
+        
+        const logItem = document.createElement('div');
+        logItem.className = 'applied-item';
+        logItem.innerHTML = `
+          <div class="applied-item-top">✓ Applied: ${issue.title}</div>
+          <div class="applied-item-desc">Replaced unilateral/risky terms with compliant clause.</div>
+        `;
+        listEl.appendChild(logItem);
+        
+        count++;
+        break;
+      }
+    }
+  });
+  
+  alert(`Successfully auto-applied ${count} suggestion(s) to the contract.`);
+  _editorIssues = [];
+  updateWizardUI();
+}
+
+async function saveEditorChanges() {
+  if (!_activeContract) return;
+  
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = Array.from(paper.getElementsByTagName('p')).map(p => p.innerText || p.textContent);
+  const newText = paragraphs.join('\n');
+  
+  try {
+    const res = await fetch(`${API_BASE}/api/history/${_activeContract.id}/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contract_text: newText })
+    });
+    
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    
+    _activeContract.rawText = newText;
+    
+    const idx = SCAN_HISTORY.findIndex(c => c.id === _activeContract.id);
+    if (idx !== -1) {
+      SCAN_HISTORY[idx].rawText = newText;
+    }
+    saveLocalScanHistory();
+    
+    alert('Changes saved successfully to database!');
+  } catch (err) {
+    console.error('Save failed:', err);
+    alert(`Failed to save changes: ${err.message}`);
+  }
+}
+
+function exportEditedDoc() {
+  if (!_activeContract) return;
+  
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = Array.from(paper.getElementsByTagName('p')).map(p => p.innerText || p.textContent);
+  const docText = paragraphs.join('\n');
+  
+  exportAsDoc(_activeContract.filename, docText);
+}
+
+function exportAsDoc(filename, text) {
+  const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' "+
+        "xmlns:w='urn:schemas-microsoft-com:office:word' "+
+        "xmlns='http://www.w3.org/TR/REC-html40'>"+
+        "<head><title>Export to Word</title><style>body { font-family: 'Times New Roman', serif; line-height: 1.5; padding: 20px; }</style></head><body>";
+  const footer = "</body></html>";
+  
+  const formattedText = text.split('\n').map(p => p.trim() ? `<p>${p}</p>` : '<br>').join('');
+  const html = header + formattedText + footer;
+
+  const blob = new Blob(['\\ufeff' + html], {
+    type: 'application/msword'
+  });
+  
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.replace(/\\.[^/.]+$/, "") + "_edited.doc";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 

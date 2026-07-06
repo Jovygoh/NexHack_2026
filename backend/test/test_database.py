@@ -81,3 +81,49 @@ def test_db_crud():
     delete_contract(db_id)
     assert get_contract_by_id(db_id) is None
     assert len(get_all_contracts()) == 0
+
+def test_search_and_update_text():
+    # Setup
+    init_db()
+    clear_all_contracts()
+    
+    from app.db import update_contract_text
+    
+    # Save contract 1
+    c1_id = save_contract({
+        "file_name": "alpha_contract.pdf",
+        "company": "Alpha Corp",
+        "risk_level": "low",
+        "contract_text": "This is the Alpha Corp freelancer agreement text."
+    })
+    
+    # Save contract 2
+    c2_id = save_contract({
+        "file_name": "beta_contract.pdf",
+        "company": "Beta Inc",
+        "risk_level": "medium",
+        "contract_text": "This is the Beta Inc document showing RM 150 fees."
+    })
+    
+    # Test search by name match
+    results_name = get_all_contracts("alpha")
+    assert len(results_name) == 1
+    assert results_name[0]["id"] == c1_id
+    
+    # Test search by content match
+    results_content = get_all_contracts("RM 150")
+    assert len(results_content) == 1
+    assert results_content[0]["id"] == c2_id
+    
+    # Test search not matching
+    results_none = get_all_contracts("nonexistent")
+    assert len(results_none) == 0
+    
+    # Test update_contract_text
+    update_contract_text(c1_id, "This is the updated text for Alpha Corp.")
+    updated_rec = get_contract_by_id(c1_id)
+    assert updated_rec["contract_text"] == "This is the updated text for Alpha Corp."
+    
+    # Clean up
+    delete_contract(c1_id)
+    delete_contract(c2_id)

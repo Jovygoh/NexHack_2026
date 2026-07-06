@@ -206,14 +206,24 @@ def save_contract(record: dict) -> int:
     conn.close()
     return inserted_id
 
-def get_all_contracts():
+def get_all_contracts(search_query: str | None = None):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, file_name, company, date, time, status, risk_score, risk_level, summary, is_automated, created_at
-        FROM contracts
-        ORDER BY id DESC
-    """)
+    if search_query:
+        p = get_placeholder()
+        like_pattern = f"%{search_query}%"
+        cursor.execute(f"""
+            SELECT id, file_name, company, date, time, status, risk_score, risk_level, summary, is_automated, created_at
+            FROM contracts
+            WHERE file_name LIKE {p} OR contract_text LIKE {p}
+            ORDER BY id DESC
+        """, (like_pattern, like_pattern))
+    else:
+        cursor.execute("""
+            SELECT id, file_name, company, date, time, status, risk_score, risk_level, summary, is_automated, created_at
+            FROM contracts
+            ORDER BY id DESC
+        """)
     rows = cursor.fetchall()
     conn.close()
     
@@ -291,6 +301,14 @@ def delete_contract(contract_id: int):
     cursor = conn.cursor()
     p = get_placeholder()
     cursor.execute(f"DELETE FROM contracts WHERE id = {p}", (contract_id,))
+    conn.commit()
+    conn.close()
+
+def update_contract_text(contract_id: int, new_text: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    p = get_placeholder()
+    cursor.execute(f"UPDATE contracts SET contract_text = {p} WHERE id = {p}", (new_text, contract_id))
     conn.commit()
     conn.close()
 
