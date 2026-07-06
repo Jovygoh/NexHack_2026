@@ -524,7 +524,7 @@ async function startScan() {
 
     // Save to history (persisted to localStorage so it survives refresh)
     SCAN_HISTORY.unshift(contract);
-    saveScanHistory();
+    saveLocalScanHistory();
     buildHistoryList();
 
     showResults(contract);
