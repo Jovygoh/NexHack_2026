@@ -1605,8 +1605,8 @@ function openEditor() {
   const paper = document.getElementById('editor-textarea');
   const rawText = _activeContract.rawText || '';
   
-  const paragraphs = rawText.split('\n').map(line => {
-    const clean = line.trim();
+  const paragraphs = rawText.split(/\r?\n\s*\r?\n/).map(block => {
+    const clean = block.trim().replace(/\s+/g, ' ');
     return `<p>${clean || '&nbsp;'}</p>`;
   }).join('');
   paper.innerHTML = paragraphs;
@@ -1738,14 +1738,13 @@ function confirmWizardStep() {
   const paragraphs = paper.getElementsByTagName('p');
   let replaced = false;
   
+  const normalizeText = (str) => (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const normOriginal = normalizeText(current.originalText);
+  
   for (let p of paragraphs) {
-    const text = (p.innerText || p.textContent).trim();
-    if (text.includes(current.originalText)) {
-      p.innerHTML = text.replace(current.originalText, editedRewrite);
-      p.setAttribute('data-wizard-hl', 'true');
-      replaced = true;
-      break;
-    } else if (current.originalText.includes(text)) {
+    const text = p.innerText || p.textContent;
+    const normText = normalizeText(text);
+    if (normText.includes(normOriginal) || normOriginal.includes(normText)) {
       p.innerHTML = editedRewrite;
       p.setAttribute('data-wizard-hl', 'true');
       replaced = true;
@@ -1791,24 +1790,14 @@ function applyAllSuggestions() {
   listEl.innerHTML = '';
   
   let count = 0;
+  const normalizeText = (str) => (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
   
   _editorIssues.forEach(issue => {
+    const normOriginal = normalizeText(issue.originalText);
     for (let p of paragraphs) {
-      const text = (p.innerText || p.textContent).trim();
-      if (text.includes(issue.originalText)) {
-        p.innerHTML = text.replace(issue.originalText, issue.rewrite);
-        
-        const logItem = document.createElement('div');
-        logItem.className = 'applied-item';
-        logItem.innerHTML = `
-          <div class="applied-item-top">✓ Applied: ${issue.title}</div>
-          <div class="applied-item-desc">Replaced unilateral/risky terms with compliant clause.</div>
-        `;
-        listEl.appendChild(logItem);
-        
-        count++;
-        break;
-      } else if (issue.originalText.includes(text)) {
+      const text = p.innerText || p.textContent;
+      const normText = normalizeText(text);
+      if (normText.includes(normOriginal) || normOriginal.includes(normText)) {
         p.innerHTML = issue.rewrite;
         
         const logItem = document.createElement('div');
