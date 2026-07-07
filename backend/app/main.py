@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import os
 from pathlib import Path
@@ -16,6 +17,11 @@ from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to
 
 from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts, get_email_config, save_email_config, disconnect_email
 from app.services.automation import start_automation_watcher, process_incoming_contracts, AUTO_IMPORT_DIR, AUTO_IMPORT_PROCESSED_DIR
+from app.services.malaysia_law_updater import (
+    read_malaysia_law_update_status,
+    start_malaysia_law_updater,
+    update_malaysia_law_database,
+)
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
@@ -26,6 +32,12 @@ def startup_event():
     AUTO_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
     AUTO_IMPORT_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     start_automation_watcher()
+    start_malaysia_law_updater(
+        LAWS_DIR,
+        source_url=settings.malaysia_law_source_url,
+        interval_hours=settings.malaysia_law_update_interval_hours,
+        enabled=settings.malaysia_law_auto_update_enabled,
+    )
 
 # CORS Setup
 app.add_middleware(
@@ -224,6 +236,24 @@ def list_reference_files():
         "laws": get_files_in_dir(LAWS_DIR),
         "policies": get_files_in_dir(POLICIES_DIR)
     }
+
+@app.get("/api/reference/laws/update-status")
+def get_malaysia_law_update_status():
+    return read_malaysia_law_update_status(LAWS_DIR)
+
+@app.post("/api/reference/laws/update")
+async def refresh_malaysia_law_reference():
+    try:
+        return await asyncio.to_thread(
+            update_malaysia_law_database,
+            LAWS_DIR,
+            source_url=settings.malaysia_law_source_url,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Malaysia law database update failed: {str(e)}"
+        )
 
 @app.post("/api/reference/upload")
 async def upload_reference_file(
