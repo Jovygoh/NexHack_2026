@@ -54,3 +54,19 @@ def test_flat_clause_splitting() -> None:
     assert sections[0].clauses[0].text == "In consideration of the payments to be made to the Service Provider."
     assert sections[1].clauses[0].id == "2"
     assert sections[2].clauses[0].id == "3"
+
+def test_strips_section_headers_from_clauses() -> None:
+    from app.services.clause_splitter import split_into_sections
+    text = """
+    4. NON-COMPETE
+    4.1 The Freelancer agrees not to compete.
+    4.2 Breach of this clause shall result in a penalty.
+    5. TERMINATION
+    5.1 The Client may terminate this Agreement.
+    """
+    sections = split_into_sections(text)
+    assert len(sections) == 2
+    non_compete_sec = next(s for s in sections if "NON-COMPETE" in s.title)
+    c42 = next(c for c in non_compete_sec.clauses if c.id == "4.2")
+    assert "TERMINATION" not in c42.text
+    assert c42.text == "Breach of this clause shall result in a penalty."
