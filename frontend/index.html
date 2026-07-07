@@ -399,6 +399,7 @@
       <div><h4>ContractSense AI</h4><div class="online">Online</div></div>
     </div>
     <div class="chat-header-btns">
+      <button class="chat-ctrl" onclick="clearChat()" title="Clear chat">↺</button>
       <button class="chat-ctrl" onclick="toggleBig()">⤢</button>
       <button class="chat-ctrl" onclick="toggleChat()">✕</button>
     </div>
@@ -408,7 +409,7 @@
   </div>
   <div class="chat-input-row">
     <input class="chat-input" id="chat-input" placeholder="Ask about your contract…" onkeydown="if(event.key==='Enter')sendMsg()">
-    <button class="send-btn" onclick="sendMsg()">➤</button>
+    <button class="send-btn" id="chat-send-btn" onclick="sendMsg()">➤</button>
   </div>
 </div>
 
