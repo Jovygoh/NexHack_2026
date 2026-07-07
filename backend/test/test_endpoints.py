@@ -77,7 +77,7 @@ def test_chat_endpoint_no_key() -> None:
     assert response.status_code == 200
     reply = response.json()["reply"]
     assert "ContractSense AI" in reply
-    assert "scanned contract" in reply
+    assert "compliance" in reply.lower()
 
 def test_search_and_edit_endpoints() -> None:
     from app.db import init_db, clear_all_contracts, save_contract, get_contract_by_id

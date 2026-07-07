@@ -1206,21 +1206,63 @@ function toggleBig()  { document.getElementById('chat-box').classList.toggle('bi
 
 // Keeps the running conversation in the {role, content} shape the backend expects
 let _chatHistory = [];
+let _chatPending = false;
+
+function clearChat() {
+  _chatHistory = [];
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+  msgs.innerHTML = '';
+  addChatMessage('ai', 'Hi! I can help you understand contract issues, explain Malaysian laws, or suggest edits. What would you like to know?');
+}
+
+function setChatPending(isPending) {
+  _chatPending = isPending;
+  const inp = document.getElementById('chat-input');
+  const btn = document.getElementById('chat-send-btn');
+  if (inp) inp.disabled = isPending;
+  if (btn) btn.disabled = isPending;
+}
+
+function addChatMessage(role, content, options = {}) {
+  const msgs = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = `msg ${role}${options.error ? ' error' : ''}`;
+  if (options.id) row.id = options.id;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.textContent = role === 'user' ? 'You' : 'AI';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.innerHTML = options.rawHtml ? content : renderMarkdown(content);
+
+  row.appendChild(avatar);
+  row.appendChild(bubble);
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+  return row;
+}
 
 async function sendMsg() {
+  if (_chatPending) return;
   const inp = document.getElementById('chat-input');
   const val = inp.value.trim();
   if (!val) return;
 
   const msgs = document.getElementById('chat-messages');
-  msgs.innerHTML += `<div class="msg user"><div class="msg-avatar">👤</div><div class="msg-bubble">${escapeHtml(val)}</div></div>`;
+  addChatMessage('user', val);
   inp.value = '';
-  msgs.scrollTop = msgs.scrollHeight;
+  setChatPending(true);
 
   // Typing indicator
   const typingId = `typing-${Date.now()}`;
-  msgs.innerHTML += `<div class="msg ai" id="${typingId}"><div class="msg-avatar">🤖</div><div class="msg-bubble">Thinking…</div></div>`;
-  msgs.scrollTop = msgs.scrollHeight;
+  const typing = addChatMessage(
+    'ai',
+    '<span class="typing-dots"><span></span><span></span><span></span></span>',
+    { id: typingId, rawHtml: true }
+  );
 
   // Build context from whichever contract is currently open (scanner result or history).
   // If no contract is loaded, send empty context — the AI can still answer
@@ -1232,6 +1274,7 @@ async function sendMsg() {
     const res = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(45000),
       body: JSON.stringify({
         message: val,
         contract_text: contractText,
@@ -1251,18 +1294,27 @@ async function sendMsg() {
     // The backend can return a long raw error string as a normal reply
     // (e.g. OpenAI quota/billing errors) — catch that case too and show
     // a short, friendly message instead of dumping the full error.
-    const displayReply = isAiErrorText(reply) ? 'Error. Please try again.' : reply;
+    const displayReply = isAiErrorText(reply)
+      ? 'The cloud AI is not available right now. I can still help once the backend API key or model connection is fixed.'
+      : reply;
 
-    document.getElementById(typingId).querySelector('.msg-bubble').innerHTML = renderMarkdown(displayReply);
+    typing.querySelector('.msg-bubble').innerHTML = renderMarkdown(displayReply);
 
     if (!isAiErrorText(reply)) {
       _chatHistory.push({ role: 'user', content: val });
       _chatHistory.push({ role: 'assistant', content: reply });
+      if (_chatHistory.length > 20) _chatHistory = _chatHistory.slice(-20);
     }
 
   } catch (err) {
-    document.getElementById(typingId).querySelector('.msg-bubble').innerHTML = 'Error. Please try again.';
+    typing.classList.add('error');
+    typing.querySelector('.msg-bubble').innerHTML = renderMarkdown(
+      `I could not reach the chatbot API at ${API_BASE}. Check that the backend is online, then try again.`
+    );
     console.error('Chat failed:', err);
+  } finally {
+    setChatPending(false);
+    inp.focus();
   }
 
   msgs.scrollTop = msgs.scrollHeight;
