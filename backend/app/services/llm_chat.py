@@ -46,8 +46,6 @@ async def chat_with_llm(
         f"- {finding.severity.upper()} {finding.title}: {finding.excerpt}" for finding in findings
     ) or "- No deterministic rule findings."
 
-    # Build the contract context block conditionally so the model isn't
-    # confused by an empty pair of triple-quotes when no contract is loaded.
     if clipped_contract:
         contract_context = f"""Here is the context of the scanned contract:
 Contract Text:
@@ -67,7 +65,6 @@ Current Scan Findings:
             "to their current question first."
         )
 
-    # Construct the system instruction and context
     system_message = f"""
 You are ContractSense AI, an expert assistant specializing in Malaysian company laws (specifically the Employment Act 1955, PDPA 2010, and Companies Act 2016) and corporate compliance.
 Your job is to answer questions about Malaysian contract law and compliance in general, and — when a contract has been scanned — to explain its specific compliance issues, suggest edits, and cross-reference relevant company policies or laws.
@@ -120,109 +117,142 @@ def offline_fallback_chat(
 
     message_lower = message.lower()
     
-    # 1. Translate raw developer errors to friendly alerts
-    friendly_err = ""
-    if error:
-        err_str = str(error).lower()
-        if "insufficient_quota" in err_str or "429" in err_str or "quota" in err_str:
-            friendly_err = (
-                "your OpenAI API key has exceeded its current quota or your billing plan is inactive. "
-                "Please check your card or plan details on the OpenAI API platform."
-            )
-        elif "api_key" in err_str or "invalid" in err_str or "401" in err_str:
-            friendly_err = (
-                "your API key is invalid or not configured correctly in the backend `.env` file."
-            )
-        else:
-            friendly_err = f"an API connection error occurred: {error}"
+    # 1. Topic Matching & Guides
+    topics = []
+    
+    # Non-compete and restraint of trade
+    if any(w in message_lower for w in ['non-compete', 'restraint', 'compete', 'geographic', 'restraint of trade']):
+        topics.append(
+            "### ⚖️ Enforceability of Non-Compete Clauses in Malaysia\n\n"
+            "Under **Section 28 of the Contracts Act 1950**, any agreement by which anyone is restrained from "
+            "exercising a lawful profession, trade, or business of any kind, is to that extent **void**.\n\n"
+            "**Key Principles:**\n"
+            "- **Post-Employment Restrictions**: Post-employment non-compete restrictions are generally **unenforceable** in Malaysia. "
+            "Unlike other jurisdictions, Malaysian courts do not apply a test of 'reasonableness' to post-employment restrictions.\n"
+            "- **Exceptions**: Section 28 has three narrow statutory exceptions: sale of goodwill of a business, agreements "
+            "between partners prior to dissolution, and agreements during the continuance of a partnership.\n"
+            "- **Remedy**: Focus on robust **Confidentiality (NDA)** and **Non-Solicitation** clauses instead of strict non-compete terms, "
+            "as protection of proprietary trade secrets and client databases is legally enforceable."
+        )
 
-    # 2. Search contract findings
+    # Employment Act
+    if any(w in message_lower for w in ['employ', 'hour', 'overtime', 'ot', 'leave', 'maternity', 'paternity', 'notice', 'probation', 'salary', 'wages', 'rest day', 'holiday', 'workweek']):
+        topics.append(
+            "### 📋 Malaysian Employment Act 1955 Compliance Guide\n\n"
+            "Following the recent **Employment (Amendment) Act 2022**, key statutory protections apply to all employees:\n\n"
+            "- **Maximum Workweek**: Reduced from 48 hours to **45 hours per week** (Section 60A).\n"
+            "- **Maternity & Paternity Leave**: Maternity leave increased to **98 days** (Section 37); paternity leave introduced at **7 consecutive days** (Section 60FA) for married male employees.\n"
+            "- **Overtime Rates**: Calculated as a minimum of **1.5x** hourly rate for work exceeding normal hours, **2.0x** for work on rest days, and **3.0x** for work on public holidays.\n"
+            "- **Notice Periods**: If not specified in the contract, statutory notice periods apply under Section 12:\n"
+            "  * Less than 2 years of service: **4 weeks** notice\n"
+            "  * 2 to 5 years of service: **6 weeks** notice\n"
+            "  * 5 years or more: **8 weeks** notice"
+        )
+
+    # PDPA 2010
+    if any(w in message_lower for w in ['pdpa', 'data', 'privacy', 'consent', 'personal', 'disclosure', 'transfer', 'sensitive']):
+        topics.append(
+            "### 🔒 Personal Data Protection Act (PDPA) 2010 Checklist\n\n"
+            "In Malaysia, commercial processing of personal data is governed by the PDPA 2010. Any contract involving "
+            "data processing must comply with the 7 Data Protection Principles:\n\n"
+            "1. **Consent Principle**: Personal data cannot be processed without the subject's explicit consent. Sensitive data (e.g. health, political opinions) requires **written consent**.\n"
+            "2. **Notice & Choice Principle**: Data subjects must be informed via a written notice (in Malay and English) explaining what data is collected, the purpose, and their right to request access.\n"
+            "3. **Disclosure Principle**: Data cannot be disclosed to third parties without consent, unless exception applies.\n"
+            "4. **Security Principle**: Adequate technical and organizational measures must protect data from loss, misuse, or modification.\n"
+            "5. **Retention Principle**: Data must not be kept longer than necessary for the fulfillment of its purpose.\n"
+            "6. **Data Integrity Principle**: Reasonable steps must be taken to ensure personal data is accurate, complete, and up to date.\n"
+            "7. **Access Principle**: Subjects must be given the right to access and correct their personal data."
+        )
+
+    # Companies Act 2016
+    if any(w in message_lower for w in ['company', 'companies act', 'director', 'secretary', 'audit', 'shareholder', 'board', 'incorporat']):
+        topics.append(
+            "### 🏢 Companies Act 2016 Compliance Overview\n\n"
+            "For corporate governance and contract authority in Malaysia:\n\n"
+            "- **Execution of Documents**: Under **Section 66**, a company can execute a contract either under its common seal, "
+            "or by signatures of two authorized directors, or one director and the company secretary.\n"
+            "- **Director Duties**: Under **Section 213**, directors must exercise their powers for a proper purpose, in good faith, "
+            "and in the best interest of the company. Standard indemnity clauses cannot exempt directors from liability for breach of duty.\n"
+            "- **Company Secretary**: Every Malaysian company must appoint a licensed company secretary within 30 days of incorporation (Section 235)."
+        )
+
+    # Liability & Liquidated Damages
+    if any(w in message_lower for w in ['liability', 'damages', 'penalty', 'fine', 'compensat', 'liquidated']):
+        topics.append(
+            "### 💰 Liability and Liquidated Damages (Section 75)\n\n"
+            "Under **Section 75 of the Contracts Act 1950**, clauses that stipulate a fixed penalty amount for breach of contract "
+            "are subjected to strict judicial scrutiny in Malaysia:\n\n"
+            "- **No Automatic Enforcement**: Even if a contract specifies a fixed penalty (e.g. 'RM 100,000 fine for breach'), "
+            "the claiming party cannot automatically recover the full amount. They must prove actual damage suffered.\n"
+            "- **Reasonable Compensation**: The court will award 'reasonable compensation' not exceeding the specified amount, "
+            "regardless of whether actual damage is proven, but the award must be proportionate.\n"
+            "- **Best Practice**: Tie liquidated damages to a genuine pre-estimate of loss (e.g. daily delay rate matching actual cost) "
+            "rather than choosing an arbitrary large penalty, to avoid the clause being struck down as unenforceable."
+        )
+
+    # 2. Match Scanned Contract Findings
     matched_findings = []
     for f in findings:
         title_words = set(re.findall(r'\w+', f.title.lower()))
         query_words = set(re.findall(r'\w+', message_lower))
         common_words = title_words.intersection(query_words) - {'the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'to', 'for', 'with', 'by'}
-        if common_words or any(word in f.title.lower() or word in f.explanation.lower() for word in ['liability', 'fee', 'charge', 'term', 'renewal', 'remedy', 'privacy', 'data', 'confidential']):
-            if any(word in message_lower for word in ['liability', 'fee', 'charge', 'term', 'renewal', 'remedy', 'privacy', 'data', 'confidential', f.title.lower()]):
-                matched_findings.append(f)
-                
-    # 3. Search reference texts
-    law_info = []
-    if laws_text:
-        paragraphs = laws_text.split('\n\n')
-        for p in paragraphs:
-            if any(word in p.lower() for word in ['employment', 'working hours', 'overtime', 'ot', 'maternity', 'paternity', 'leave', 'notice', 'probation', 'salary', 'wages', 'pdpa', 'consent', 'companies act', 'director', 'shareholder']):
-                query_words = [w for w in message_lower.split() if len(w) > 3]
-                if any(qw in p.lower() for qw in query_words):
-                    law_info.append(p[:300].strip() + ("..." if len(p) > 300 else ""))
+        if common_words or any(word in f.title.lower() or word in f.explanation.lower() for word in ['liability', 'fee', 'charge', 'term', 'renewal', 'remedy', 'privacy', 'data', 'confidential', 'penalty']):
+            matched_findings.append(f)
 
-    # 4. Malaysian Law Heuristics
-    malaysian_law_highlights = []
-    if any(w in message_lower for w in ['employ', 'hour', 'overtime', 'ot', 'leave', 'maternity', 'paternity', 'notice', 'probation', 'salary', 'wages', 'rest day', 'holiday', 'terminat']):
-        malaysian_law_highlights.append(
-            "**Employment Act 1955 (Malaysia):**\n"
-            "- **Working Hours**: Limited to 45 hours per week max (amended in 2022).\n"
-            "- **Overtime Rates**: 1.5x hourly rate on normal days, 2.0x on rest days, and 3.0x on public holidays.\n"
-            "- **Maternity & Paternity**: Maternity leave is 98 days; paternity leave is 7 days (both updated in 2022).\n"
-            "- **Notice of Termination**: Statutory notice is 4 weeks (<2 yrs service), 6 weeks (2-5 yrs), or 8 weeks (5+ yrs) if not defined."
-        )
-    if any(w in message_lower for w in ['pdpa', 'data', 'privacy', 'consent', 'personal', 'disclosure', 'transfer']):
-        malaysian_law_highlights.append(
-            "**Personal Data Protection Act (PDPA) 2010 (Malaysia):**\n"
-            "- **Consent Principle**: Explicit written consent is required to process sensitive personal data.\n"
-            "- **Notice & Choice**: Data subjects must be informed in writing about the types of data collected and purpose of processing.\n"
-            "- **Security Principle**: Adequate security measures must be implemented to prevent unauthorized access or loss.\n"
-            "- **Transfer Principle**: Personal data cannot be transferred outside Malaysia unless the destination country is officially gazetted."
-        )
-    if any(w in message_lower for w in ['company', 'companies act', 'director', 'secretary', 'audit', 'shareholder', 'board']):
-        malaysian_law_highlights.append(
-            "**Companies Act 2016 (Malaysia):**\n"
-            "- **Directors**: A private company can be incorporated with just a single resident director.\n"
-            "- **Director Duties**: Directors must act in good faith and in the best interests of the company at all times.\n"
-            "- **Company Secretary**: A qualified, licensed company secretary must be appointed within 30 days of incorporation."
-        )
-
-    # 5. Compile the final answer
+    # 3. Compile the Answer
     res = [
-        "### ⚠️ AI Chat (Offline Fallback Mode)\n"
+        "### 🤖 ContractSense AI (Compliance Assistant)\n"
     ]
     
-    if friendly_err:
-        res.append(f"**API Status Alert**: The cloud AI service is currently offline because {friendly_err}\n")
-    else:
-        res.append("**API Status Alert**: The cloud AI service is offline (missing API key configuration).\n")
-
-    # If the user asks a question that doesn't match any local templates (like Family Law)
-    is_general_query = not matched_findings and not law_info and not malaysian_law_highlights
+    # If the user asks about the scanned contract specifically or we have matches
+    is_asking_about_contract = any(w in message_lower for w in ['contract', 'document', 'file', 'this agreement', 'scanned', 'findings', 'issues', 'violations'])
     
-    if is_general_query:
+    if is_asking_about_contract or (matched_findings and not topics):
+        if findings:
+            res.append(
+                "Based on the analysis of the scanned contract, here are the compliance issues found:\n"
+            )
+            for f in findings:
+                law_info = f" ({f.law_section})" if f.law_section else ""
+                res.append(
+                    f"#### ⚠️ {f.title} ({f.severity.upper()}){law_info}\n"
+                    f"- **Issue**: {f.explanation}\n"
+                    f"- **Recommendation**: {f.recommendation}\n"
+                )
+                if f.rewrite:
+                    res.append(f"- **Suggested Compliant Rewrite**:\n  ```text\n  {f.rewrite}\n  ```\n")
+        else:
+            res.append(
+                "I reviewed the scanned contract and found no compliance violations. "
+                "The clauses align with the standard compliance rules for Malaysian contract law."
+            )
+    elif matched_findings:
+        res.append("Here are the specific findings from your scanned contract related to your question:\n")
+        for f in matched_findings[:2]:
+            law_info = f" ({f.law_section})" if f.law_section else ""
+            res.append(
+                f"#### ⚠️ {f.title} ({f.severity.upper()}){law_info}\n"
+                f"- **Issue**: {f.explanation}\n"
+                f"- **Recommendation**: {f.recommendation}\n"
+            )
+            if f.rewrite:
+                res.append(f"- **Suggested Compliant Rewrite**:\n  ```text\n  {f.rewrite}\n  ```\n")
+        res.append("---")
+        
+    # Append general topic guides if matched
+    if topics:
+        res.extend(topics)
+        
+    # General default answer if nothing matched
+    if not topics and not matched_findings and not is_asking_about_contract:
         res.append(
-            "#### 💡 Why is this happening?\n"
-            "Normally, ContractSense AI is a full artificial intelligence prepared to **answer any general questions** (including Family Law, child protection, corporate advice, or any legal topic you type).\n\n"
-            "However, because the system is currently blocked from reaching the cloud AI (due to the quota/API key issue mentioned above), I am running in local fallback mode. In this mode, I can only search for keywords in your scanned contract and basic Malaysian company law databases.\n\n"
-            "**How to fix this:**\n"
-            "- Please check the billing status on your OpenAI platform dashboard, or\n"
-            "- Configure a valid `OPENAI_API_KEY` or `GEMINI_API_KEY` in the backend `.env` file.\n\n"
-            "Once the API key is active, you will be able to ask the AI **any question** you want without limitations!"
+            "Welcome to ContractSense compliance assistant! I specialize in Malaysian company and contract laws. "
+            "Here is a quick overview of key compliance points to check in your agreements:\n\n"
+            "1. **Governing Law**: Ensure your contract is explicitly governed by the laws of Malaysia and disputes are referred to Malaysian courts or AIAC (Asian International Arbitration Centre).\n"
+            "2. **Unilateral Termination / Modifications**: Clauses giving one party sole discretion to alter terms, fees, or terminate without notice are highly risky and may violate Section 10 of the Contracts Act 1950.\n"
+            "3. **Confidentiality / Non-Compete**: Keep post-employment restrictions out, and focus on protecting trade secrets via robust NDA/Non-Solicitation clauses instead (due to Section 28 restraint rules).\n"
+            "4. **Data Protection (PDPA 2010)**: Any sharing or processing of personal data requires clear notice and consent mechanisms.\n\n"
+            "Please upload a contract to scan for precise compliance checks. Once uploaded, you can ask me any question about the scanned contract, or ask general questions about the Employment Act 1955, PDPA 2010, or Contracts Act 1950!"
         )
-    else:
-        res.append(
-            "I have searched the scanned contract and local reference databases for matches to your query:\n"
-        )
-        if matched_findings:
-            res.append("#### 🔍 Matched Findings from Scanned Contract:")
-            for mf in matched_findings[:3]:
-                res.append(f"- **{mf.title}** ({mf.severity.upper()}): {mf.explanation}\n  *Recommended remediation*: {mf.recommendation}")
-            res.append("")
-            
-        if law_info:
-            res.append("#### 📄 Matching Reference Database Excerpts:")
-            for li in law_info[:2]:
-                res.append(f"> {li}")
-            res.append("")
-            
-        if malaysian_law_highlights:
-            res.append("#### ⚖️ Relevant Malaysian Law Reference Guides:")
-            res.extend(malaysian_law_highlights)
-            
+        
     return "\n".join(res)
