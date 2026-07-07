@@ -1934,6 +1934,12 @@ async function saveEditorChanges() {
   }
 }
 
+function exportActiveContractDoc() {
+  if (!_activeContract) return;
+  const docText = _activeContract.rawText || _activeContract.contract_text || '';
+  exportAsDoc(_activeContract.filename, docText);
+}
+
 function exportEditedDoc() {
   if (!_activeContract) return;
   
