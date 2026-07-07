@@ -87,6 +87,12 @@ def split_into_sections(text: str) -> list[Section]:
         if not clause_text:
             continue
 
+        # Strip trailing section headers that belong to the next section but got captured at the end of this clause
+        clause_text = re.sub(r"\s*(?<![\d.])\d{1,2}\.\s+[A-Za-z][A-Za-z\s\-]{2,60}?$", "", clause_text).strip()
+
+        if not clause_text:
+            continue
+
         section_num = clause_id.split(".")[0]
 
         if section_num not in sections:
