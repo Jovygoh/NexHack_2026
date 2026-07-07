@@ -198,7 +198,46 @@ function onIssueClick(el, issueListElId, suggestionTextElId, copyBtnId) {
   if (!clause) return;
 
   const sEl = document.getElementById(suggestionTextElId);
-  if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
+  if (sEl) {
+    const getLawLink = (lawText) => {
+      if (!lawText) return '#';
+      const lower = lawText.toLowerCase();
+      if (lower.includes('employment act 1955') || lower.includes('employment act')) {
+        return 'https://lom.agc.gov.my/act-detail.php?language=BI&act=265';
+      }
+      if (lower.includes('pdpa') || lower.includes('personal data protection')) {
+        return 'https://lom.agc.gov.my/act-detail.php?language=BI&act=709';
+      }
+      if (lower.includes('companies act')) {
+        return 'https://lom.agc.gov.my/act-detail.php?language=BI&act=778';
+      }
+      if (lower.includes('contracts act 1950') || lower.includes('contracts act')) {
+        return 'https://lom.agc.gov.my/act-detail.php?language=BI&act=136';
+      }
+      return `https://www.google.com/search?q=${encodeURIComponent(lawText + " Malaysia")}`;
+    };
+
+    const lawLink = getLawLink(clause.law);
+    const lawBadgeHtml = clause.law
+      ? `<a href="${lawLink}" target="_blank" class="sug-law-badge" title="Click to view official Malaysian Law Document">
+           📖 ${clause.law} ↗
+         </a>`
+      : '';
+
+    sEl.innerHTML = `
+      <div class="sug-details">
+        ${lawBadgeHtml}
+        <div class="sug-explanation">
+          <strong>Full Issue Explanation:</strong><br>
+          ${renderMarkdown(clause.desc || 'No explanation available.')}
+        </div>
+        <div class="sug-rewrite-wrap">
+          <strong>Suggested Compliant Rewrite:</strong>
+          <div class="sug-rewrite-content">${renderMarkdown(clause.suggestion || 'No suggestion available.')}</div>
+        </div>
+      </div>
+    `;
+  }
 
   const boxId = suggestionTextElId === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
   const boxEl = document.getElementById(boxId);
