@@ -158,86 +158,65 @@ function renderIssuesList(contract, issueListEl, chipOk, chipWarn, chipBad, sugg
 
   issueListEl.innerHTML = issues.map(c => {
     const safeId = (c.findingId || c.id).replace(/[^a-zA-Z0-9]/g, '_');
-    const lawText = c.law ? `${c.law} — ` : '';
-    const descSnippet = (c.desc || '').substring(0, 90);
+    const lawBadge = c.law ? `<div class="issue-law-badge">📖 Law: ${c.law}</div>` : '';
+    const lawTextSection = c.lawText ? `<div class="issue-law-text"><strong>Statute:</strong> <em>"${c.lawText}"</em></div>` : '';
+    const rewriteText = c.suggestion ? `<div class="issue-sug-edit"><strong>Suggested Edit:</strong><br>${c.suggestion}</div>` : '';
+
     return `
       <div class="issue-item" id="${issueListEl.id}-issue-${safeId}"
         data-finding-id="${c.findingId || ''}"
         data-status="${c.status}"
-        onclick="onIssueClick(this, '${issueListEl.id}', '${suggestionTextEl.id}', '${copyBtn.id}')">
+        onclick="onIssueClick(this, '${issueListEl.id}')">
         <div class="issue-top">
           <div class="issue-badge ${c.status}">${c.id}</div>
           <div class="issue-name">${c.issue || ''}</div>
         </div>
-        <div class="issue-desc">${lawText}${descSnippet}${descSnippet.length >= 90 ? '…' : ''}</div>
+        <div class="issue-desc-short">${c.law ? c.law + ' — ' : ''}${(c.desc || '').substring(0, 90)}${(c.desc || '').length >= 90 ? '…' : ''}</div>
+        
+        <div class="issue-details" style="display: none;">
+          ${lawBadge}
+          ${lawTextSection}
+          <div class="issue-full-desc">
+            <strong>Full Explanation:</strong><br>${c.desc || 'No explanation available.'}
+          </div>
+          ${rewriteText}
+        </div>
       </div>
     `;
   }).join('');
 }
 
-// Called when user clicks an issue item in PDF-native mode.
+// Called when user clicks an issue item.
 // Reads the finding_id from the element's data attribute, highlights
-// the corresponding boxes on the real PDF, and shows the suggestion.
-function onIssueClick(el, issueListElId, suggestionTextElId, copyBtnId) {
+// the corresponding boxes on the real PDF, and expands the detailed view in-place.
+function onIssueClick(el, issueListElId) {
   const findingId = el.dataset.findingId;
   const contract  = _activeContract;
   if (!contract || !findingId) return;
 
-  // Highlight in issues sidebar
+  const isCurrentlyActive = el.classList.contains('active');
+
+  // Close all other issue items in the list
   const issueList = document.getElementById(issueListElId);
-  issueList.querySelectorAll('.issue-item').forEach(i => i.classList.remove('active'));
-  el.classList.add('active');
+  issueList.querySelectorAll('.issue-item').forEach(i => {
+    i.classList.remove('active');
+    const details = i.querySelector('.issue-details');
+    if (details) details.style.display = 'none';
+    const shortDesc = i.querySelector('.issue-desc-short');
+    if (shortDesc) shortDesc.style.display = 'block';
+  });
 
-  // Scroll + activate the highlight on the real PDF
-  if (contract._pdfViewerHandle) {
-    contract._pdfViewerHandle.scrollToFinding(findingId);
-  }
+  if (!isCurrentlyActive) {
+    el.classList.add('active');
+    const details = el.querySelector('.issue-details');
+    if (details) details.style.display = 'flex';
+    const shortDesc = el.querySelector('.issue-desc-short');
+    if (shortDesc) shortDesc.style.display = 'none';
 
-  // Find the clause to get its suggestion
-  const clause = contract.sections.flatMap(s => s.clauses).find(c => c.findingId === findingId);
-  if (!clause) return;
-
-  const sEl = document.getElementById(suggestionTextElId);
-  if (sEl) {
-    const lawBadgeHtml = clause.law
-      ? `<div class="sug-law-badge" title="Applicable Law Provision">
-           📖 Law: ${clause.law}
-         </div>`
-      : '';
-
-    const lawTextHtml = clause.lawText
-      ? `<div class="sug-law-text">
-           <strong>Official Statutory Law Text:</strong><br>
-           <em>"${clause.lawText}"</em>
-         </div>`
-      : '';
-
-    sEl.innerHTML = `
-      <div class="sug-details">
-        ${lawBadgeHtml}
-        ${lawTextHtml}
-        <div class="sug-explanation">
-          <strong>Full Issue Explanation:</strong><br>
-          ${renderMarkdown(clause.desc || 'No explanation available.')}
-        </div>
-        <div class="sug-rewrite-wrap">
-          <strong>Suggested Compliant Rewrite:</strong>
-          <div class="sug-rewrite-content">${renderMarkdown(clause.suggestion || 'No suggestion available.')}</div>
-        </div>
-      </div>
-    `;
-  }
-  const boxId = suggestionTextElId === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
-  const boxEl = document.getElementById(boxId);
-  if (boxEl) boxEl.classList.remove('collapsed');
-
-  const btn = document.getElementById(copyBtnId);
-  if (btn && clause.suggestion) {
-    btn.onclick = () => {
-      navigator.clipboard.writeText(clause.suggestion).catch(() => {});
-      btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy suggestion', 2000);
-    };
+    // Scroll + activate the highlight on the real PDF
+    if (contract._pdfViewerHandle) {
+      contract._pdfViewerHandle.scrollToFinding(findingId);
+    }
   }
 }
 
@@ -246,28 +225,12 @@ function activateFindingById(findingId, contract, issueListEl, suggestionTextEl,
   const safeId = findingId.replace(/[^a-zA-Z0-9]/g, '_');
   const el = document.getElementById(`${issueListEl.id}-issue-${safeId}`);
 
-  issueListEl.querySelectorAll('.issue-item').forEach(i => i.classList.remove('active'));
   if (el) {
-    el.classList.add('active');
+    // Trigger onIssueClick to expand and highlight the issue list card
+    el.click();
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  if (pdfHandle) pdfHandle.scrollToFinding(findingId);
-
-  const clause = contract.sections.flatMap(s => s.clauses).find(c => c.findingId === findingId);
-  if (!clause) return;
-  if (suggestionTextEl) suggestionTextEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
-
-  const boxId = suggestionTextEl.id === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
-  const boxEl = document.getElementById(boxId);
-  if (boxEl) boxEl.classList.remove('collapsed');
-
-  if (copyBtn && clause.suggestion) {
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(clause.suggestion).catch(() => {});
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => copyBtn.textContent = 'Copy suggestion', 2000);
-    };
+  } else if (pdfHandle) {
+    pdfHandle.scrollToFinding(findingId);
   }
 }
 
@@ -290,27 +253,12 @@ function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, c
     clauseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  // Highlight in issue list
+  // Highlight and expand in issue list
   const issueList = document.getElementById(issueListElId);
-  issueList.querySelectorAll('.issue-item').forEach(el => el.classList.remove('active'));
   const issueEl = document.getElementById(`${issueListElId}-issue-${safeId}`);
-  if (issueEl) { issueEl.classList.add('active'); issueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
-
-  // Show suggestion
-  const sEl = document.getElementById(suggestionTextElId);
-  if (sEl) sEl.innerHTML = renderMarkdown(clause.suggestion || 'No suggestion available.');
-
-  const boxId = suggestionTextElId === 'suggestion-text' ? 'suggestion-box' : 'history-suggestion-box';
-  const boxEl = document.getElementById(boxId);
-  if (boxEl) boxEl.classList.remove('collapsed');
-
-  const btn = document.getElementById(copyBtnId);
-  if (btn && clause.suggestion) {
-    btn.onclick = () => {
-      navigator.clipboard.writeText(clause.suggestion).catch(() => {});
-      btn.textContent = 'Copied!';
-      setTimeout(() => btn.textContent = 'Copy suggestion', 2000);
-    };
+  if (issueEl) {
+    issueEl.click();
+    issueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
