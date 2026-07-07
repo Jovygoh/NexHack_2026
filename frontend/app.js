@@ -1605,9 +1605,72 @@ function openEditor() {
   const paper = document.getElementById('editor-textarea');
   const rawText = _activeContract.rawText || '';
   
-  const paragraphs = rawText.split(/\r?\n\s*\r?\n/).map(block => {
-    const clean = block.trim().replace(/\s+/g, ' ');
-    return `<p>${clean || '&nbsp;'}</p>`;
+  const buildParagraphsFromLines = (text) => {
+    const lines = text.split(/\r?\n/).map(l => l.trim());
+    const blocks = [];
+    let currentBlock = [];
+
+    const startsWithClauseNumber = (line) => {
+      return /^(?:\d+\.\d+(?:\.\d+)?|\d+\.|\b[A-Z]\.)\s+/.test(line);
+    };
+
+    const isNewParagraphStart = (line, prevLine) => {
+      if (!line) return false;
+      if (startsWithClauseNumber(line)) return true;
+      
+      const upperLine = line.toUpperCase();
+      if (upperLine.startsWith('NON-DISCLOSURE AGREEMENT') || 
+          upperLine.startsWith('MUTUAL CONFIDENTIALITY') ||
+          upperLine.startsWith('BETWEEN:') ||
+          upperLine.startsWith('AND:') ||
+          upperLine.startsWith('DATE:') ||
+          upperLine.startsWith('IN WITNESS WHEREOF') ||
+          upperLine === 'OBLIGATIONS' ||
+          upperLine === 'DURATION' ||
+          upperLine === 'REMEDY' ||
+          upperLine === 'GOVERNING LAW') {
+        return true;
+      }
+      
+      if (!prevLine) return true;
+      if (prevLine.endsWith('.') || prevLine.endsWith(':') || prevLine.endsWith(';')) return true;
+      if (prevLine.length < 50) return true;
+      
+      return false;
+    };
+
+    let prev = '';
+    for (let line of lines) {
+      if (!line) {
+        if (currentBlock.length > 0) {
+          blocks.push(currentBlock.join(' '));
+          currentBlock = [];
+        }
+        prev = '';
+        continue;
+      }
+
+      if (isNewParagraphStart(line, prev)) {
+        if (currentBlock.length > 0) {
+          blocks.push(currentBlock.join(' '));
+        }
+        currentBlock = [line];
+      } else {
+        currentBlock.push(line);
+      }
+      prev = line;
+    }
+
+    if (currentBlock.length > 0) {
+      blocks.push(currentBlock.join(' '));
+    }
+
+    return blocks;
+  };
+
+  const blocks = buildParagraphsFromLines(rawText);
+  const paragraphs = blocks.map(block => {
+    return `<p>${block || '&nbsp;'}</p>`;
   }).join('');
   paper.innerHTML = paragraphs;
   
