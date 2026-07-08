@@ -1971,6 +1971,83 @@ function removeWizardHighlight() {
   });
 }
 
+function normaliseEditorText(str) {
+  return (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function escapeRegExp(str) {
+  return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function applyClausePrefix(originalText, rewriteText) {
+  const match = String(originalText || '').trim().match(/^(\d+(?:\.\d+)*\.?|[A-Za-z]\.)\s+/);
+  if (!match) return String(rewriteText || '').trim();
+  const prefix = match[0];
+  const cleanRewrite = String(rewriteText || '').trim();
+  if (cleanRewrite.startsWith(prefix.trim())) return cleanRewrite;
+  return prefix + cleanRewrite;
+}
+
+function markParagraphApplied(paragraph) {
+  paragraph.setAttribute('data-wizard-hl', 'true');
+  paragraph.setAttribute('data-auto-applied', 'true');
+  paragraph.style.outline = '2px solid var(--green)';
+  paragraph.style.borderRadius = '4px';
+  paragraph.style.background = 'rgba(46, 204, 143, 0.18)';
+}
+
+function buildReplacementCandidates(originalText) {
+  const clean = String(originalText || '').trim();
+  const withoutClauseId = clean.replace(/^(\d+(?:\.\d+)*\.?|[A-Za-z]\.)\s+/, '').trim();
+  return [...new Set([clean, withoutClauseId].filter(Boolean).sort((a, b) => b.length - a.length))];
+}
+
+function replaceIssueInParagraph(paragraph, issue, rewriteText) {
+  const currentText = paragraph.innerText || paragraph.textContent || '';
+  const candidates = buildReplacementCandidates(issue.originalText);
+  const finalRewrite = applyClausePrefix(currentText, rewriteText);
+
+  for (const candidate of candidates) {
+    if (currentText.includes(candidate)) {
+      paragraph.textContent = currentText.replace(candidate, finalRewrite);
+      markParagraphApplied(paragraph);
+      return true;
+    }
+
+    const flexiblePattern = new RegExp(escapeRegExp(candidate).replace(/\\\s+/g, '\\s+'), 'i');
+    if (flexiblePattern.test(currentText)) {
+      paragraph.textContent = currentText.replace(flexiblePattern, finalRewrite);
+      markParagraphApplied(paragraph);
+      return true;
+    }
+  }
+
+  const normalisedParagraph = normaliseEditorText(currentText);
+  const normalisedCandidates = candidates.map(normaliseEditorText).filter(Boolean);
+  if (
+    normalisedCandidates.some(candidate => normalisedParagraph.includes(candidate)) ||
+    normalisedCandidates.some(candidate => candidate.includes(normalisedParagraph) && normalisedParagraph.length > 30)
+  ) {
+    paragraph.textContent = finalRewrite;
+    markParagraphApplied(paragraph);
+    return true;
+  }
+
+  return false;
+}
+
+function applyIssueRewrite(issue, rewriteText) {
+  const paper = document.getElementById('editor-textarea');
+  const paragraphs = Array.from(paper.getElementsByTagName('p'));
+  for (const paragraph of paragraphs) {
+    if (replaceIssueInParagraph(paragraph, issue, rewriteText)) {
+      paragraph.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return true;
+    }
+  }
+  return false;
+}
+
 function confirmWizardStep() {
   if (_editorWizardIndex >= _editorIssues.length) return;
   
@@ -1979,33 +2056,7 @@ function confirmWizardStep() {
   
   if (!editedRewrite) return;
   
-  const paper = document.getElementById('editor-textarea');
-  const paragraphs = paper.getElementsByTagName('p');
-  let replaced = false;
-  
-  const normalizeText = (str) => (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  const normOriginal = normalizeText(current.originalText);
-  
-  const applyPrefix = (origText, rew) => {
-    const match = origText.match(/^(\d+(?:\.\d+)*\.?|[A-Za-z]\.)\s+/);
-    if (!match) return rew;
-    const prefix = match[0];
-    const cleanRew = rew.trim();
-    if (cleanRew.startsWith(prefix.trim())) return rew;
-    return prefix + cleanRew;
-  };
-  
-  for (let p of paragraphs) {
-    const text = p.innerText || p.textContent;
-    const normText = normalizeText(text);
-    if (normText.includes(normOriginal) || normOriginal.includes(normText)) {
-      const finalRewrite = applyPrefix(text, editedRewrite);
-      p.innerHTML = finalRewrite;
-      p.setAttribute('data-wizard-hl', 'true');
-      replaced = true;
-      break;
-    }
-  }
+  const replaced = applyIssueRewrite(current, editedRewrite);
   
   if (replaced) {
     showReplacementAlert();
@@ -2039,49 +2090,40 @@ function applyAllSuggestions() {
     return;
   }
   
-  const paper = document.getElementById('editor-textarea');
-  const paragraphs = paper.getElementsByTagName('p');
   const listEl = document.getElementById('applied-list');
   listEl.innerHTML = '';
   
   let count = 0;
-  const normalizeText = (str) => (str || '').replace(/\s+/g, ' ').trim().toLowerCase();
-  
-  const applyPrefix = (origText, rew) => {
-    const match = origText.match(/^(\d+(?:\.\d+)*\.?|[A-Za-z]\.)\s+/);
-    if (!match) return rew;
-    const prefix = match[0];
-    const cleanRew = rew.trim();
-    if (cleanRew.startsWith(prefix.trim())) return rew;
-    return prefix + cleanRew;
-  };
+  const missed = [];
   
   _editorIssues.forEach(issue => {
-    const normOriginal = normalizeText(issue.originalText);
-    for (let p of paragraphs) {
-      const text = p.innerText || p.textContent;
-      const normText = normalizeText(text);
-      if (normText.includes(normOriginal) || normOriginal.includes(normText)) {
-        const finalRewrite = applyPrefix(text, issue.rewrite);
-        p.innerHTML = finalRewrite;
-        
-        const logItem = document.createElement('div');
-        logItem.className = 'applied-item';
-        logItem.innerHTML = `
-          <div class="applied-item-top">✓ Applied: ${issue.title}</div>
-          <div class="applied-item-desc">Replaced unilateral/risky terms with compliant clause.</div>
-        `;
-        listEl.appendChild(logItem);
-        
-        count++;
-        break;
-      }
+    const replaced = applyIssueRewrite(issue, issue.rewrite);
+    if (replaced) {
+      const logItem = document.createElement('div');
+      logItem.className = 'applied-item';
+      logItem.innerHTML = `
+        <div class="applied-item-top">✓ Applied: ${issue.title}</div>
+        <div class="applied-item-desc">Original issue clause was replaced with the suggested compliant clause.</div>
+      `;
+      listEl.appendChild(logItem);
+      count++;
+    } else {
+      missed.push(issue);
     }
   });
   
-  alert(`Successfully auto-applied ${count} suggestion(s) to the contract.`);
-  _editorIssues = [];
+  _editorIssues = missed;
+  if (count > 0) {
+    const paper = document.getElementById('editor-textarea');
+    const firstApplied = paper.querySelector('[data-auto-applied="true"]');
+    firstApplied?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
   updateWizardUI();
+  alert(
+    missed.length
+      ? `Auto-applied ${count} suggestion(s). ${missed.length} issue(s) need manual review.`
+      : `Successfully auto-applied ${count} suggestion(s) to the contract.`
+  );
 }
 
 async function saveEditorChanges() {
