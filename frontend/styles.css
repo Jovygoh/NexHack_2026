@@ -685,6 +685,10 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
   margin-bottom: 1.2em;
   text-align: justify;
 }
+.editor-paper p[data-auto-applied="true"] {
+  padding: 6px 8px;
+  border-left: 3px solid var(--green);
+}
 .editor-paper p:last-child {
   margin-bottom: 0;
 }
