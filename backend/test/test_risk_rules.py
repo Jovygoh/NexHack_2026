@@ -52,6 +52,51 @@ def test_detects_employment_hours_and_non_compete() -> None:
     assert any(fid.startswith("post-employment-non-compete") for fid in ids)
 
 
+def test_detects_specific_employment_and_pdpa_errors() -> None:
+    text = """
+    1. EMPLOYMENT AND DATA TERMS
+    1.1 All overtime shall be compensated at the standard hourly rate with no additional premium.
+    1.2 The Employee may be required to work on public holidays without additional compensation.
+    1.3 The Employee shall receive 5 days annual leave per year.
+    1.4 Sick leave entitlement shall be 5 days per year.
+    1.5 The Employee waives all rights under the Personal Data Protection Act 2010.
+    """
+
+    findings = analyze_text(text)
+
+    ids = {finding.id for finding in findings}
+    assert any(fid.startswith("no-overtime-premium") for fid in ids)
+    assert any(fid.startswith("public-holiday-no-pay") for fid in ids)
+    assert any(fid.startswith("insufficient-annual-leave") for fid in ids)
+    assert any(fid.startswith("insufficient-sick-leave") for fid in ids)
+    assert any(fid.startswith("pdpa-rights-waiver") for fid in ids)
+
+
+def test_filters_findings_by_selected_laws() -> None:
+    text = """
+    1. SELECTED LAW TERMS
+    1.1 The Employee shall work 60 hours per week as normal working hours.
+    1.2 The Employee waives all rights under the Personal Data Protection Act 2010.
+    1.3 Any employee may sign and bind the company without board approval.
+    """
+
+    employment_findings = analyze_text(text, selected_laws=["employment"])
+    employment_ids = {finding.id for finding in employment_findings}
+    assert any(fid.startswith("excessive-working-hours") for fid in employment_ids)
+    assert not any(fid.startswith("pdpa-rights-waiver") for fid in employment_ids)
+    assert not any(fid.startswith("unclear-company-execution-authority") for fid in employment_ids)
+
+    pdpa_findings = analyze_text(text, selected_laws=["pdpa"])
+    pdpa_ids = {finding.id for finding in pdpa_findings}
+    assert any(fid.startswith("pdpa-rights-waiver") for fid in pdpa_ids)
+    assert not any(fid.startswith("excessive-working-hours") for fid in pdpa_ids)
+
+    companies_findings = analyze_text(text, selected_laws=["companies"])
+    companies_ids = {finding.id for finding in companies_findings}
+    assert any(fid.startswith("unclear-company-execution-authority") for fid in companies_ids)
+    assert not any(fid.startswith("excessive-working-hours") for fid in companies_ids)
+
+
 def test_flat_clause_splitting() -> None:
     from app.services.clause_splitter import split_into_sections
     text = """

@@ -78,10 +78,10 @@
     <div class="rules-section">
       <div class="section-label">Check against</div>
       <div class="rule-pills">
-        <div class="rule-pill active" onclick="togglePill(this)"><span class="dot"></span>Employment Act 1955</div>
-        <div class="rule-pill active" onclick="togglePill(this)"><span class="dot"></span>PDPA 2010</div>
-        <div class="rule-pill active" onclick="togglePill(this)"><span class="dot"></span>Companies Act 2016</div>
-        <div class="rule-pill" id="company-policy-pill" onclick="openPolicyLinkModal()"><span class="dot"></span>Company policy</div>
+        <div class="rule-pill active" data-law-id="employment" onclick="toggleLawPill(this)"><span class="dot"></span>Employment Act 1955</div>
+        <div class="rule-pill active" data-law-id="pdpa" onclick="toggleLawPill(this)"><span class="dot"></span>PDPA 2010</div>
+        <div class="rule-pill active" data-law-id="companies" onclick="toggleLawPill(this)"><span class="dot"></span>Companies Act 2016</div>
+        <div class="rule-pill" id="company-policy-pill" onclick="toggleCompanyPolicyPill()"><span class="dot"></span>Company policy</div>
       </div>
       <div class="policy-source-status" id="policy-source-status">No company policy linked yet.</div>
     </div>
@@ -286,7 +286,9 @@
       </div>
       <div class="editor-footer-bar">
         <button class="btn-primary" onclick="saveEditorChanges()">💾 Save changes</button>
-        <button class="btn-ghost" onclick="exportEditedPdf()">📥 Export as PDF</button>
+        <button class="btn-ghost" onclick="openExportModal('updated')">📥 Export / save</button>
+        <button class="btn-ghost" id="rescan-edited-btn" onclick="rescanEditedContract()">🔍 Rescan edited</button>
+        <button class="btn-ghost" id="next-batch-btn" onclick="openNextBatchContract()" style="display:none">Next scanned file</button>
       </div>
     </div>
     <div class="resize-divider" id="editor-resize-divider"></div>

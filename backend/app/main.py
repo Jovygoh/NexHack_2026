@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -11,7 +12,7 @@ from app.config import get_settings
 from app.models import ContractAnalysisResponse, ClauseFinding, PageSize, HighlightBoxOut
 from app.services.llm_review import review_with_llm
 from app.services.llm_chat import chat_with_llm
-from app.services.risk_rules import analyze_text, calculate_risk_score, risk_level_from_score
+from app.services.risk_rules import SELECTABLE_LAW_IDS, analyze_text, calculate_risk_score, risk_level_from_score
 from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
 from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
@@ -98,6 +99,50 @@ class ChatRequest(BaseModel):
 
 class CompanyPolicyLinkRequest(BaseModel):
     source_url: str
+
+class ContractTextAnalyzeRequest(BaseModel):
+    file_name: str = "edited-contract.txt"
+    contract_text: str
+    jurisdiction: str | None = "Malaysia"
+    language: str | None = "English"
+    selected_laws: list[str] | None = None
+    include_company_policy: bool = True
+
+
+def _parse_selected_laws(raw: str | None) -> list[str]:
+    if raw is None or raw.strip() == "":
+        return list(SELECTABLE_LAW_IDS)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = [part.strip() for part in raw.split(",")]
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="selected_laws must be a JSON array or comma-separated list.",
+        )
+    return _normalise_selected_laws(parsed)
+
+
+def _normalise_selected_laws(selected_laws: list[str] | None) -> list[str]:
+    if selected_laws is None:
+        return list(SELECTABLE_LAW_IDS)
+    allowed = set(SELECTABLE_LAW_IDS)
+    normalised: list[str] = []
+    for law in selected_laws:
+        law_id = str(law).strip().lower()
+        if law_id in allowed and law_id not in normalised:
+            normalised.append(law_id)
+    return normalised
+
+
+def _selected_law_labels(selected_laws: list[str]) -> list[str]:
+    labels = {
+        "employment": "Employment Act 1955",
+        "pdpa": "PDPA 2010",
+        "companies": "Companies Act 2016",
+    }
+    return [labels[law] for law in selected_laws if law in labels]
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
@@ -107,6 +152,8 @@ async def analyze_contract(
     file: UploadFile = File(...),
     jurisdiction: str | None = Form(default=None),
     language: str | None = Form(default=None),
+    selected_laws: str | None = Form(default=None),
+    include_company_policy: bool = Form(default=True),
 ) -> ContractAnalysisResponse:
     content, extension = await read_and_validate_upload(file, settings.max_upload_mb)
     contract_text = extract_text_from_bytes(content, extension)
@@ -117,10 +164,12 @@ async def analyze_contract(
             detail="Could not extract readable text from the uploaded contract.",
         )
 
-    # Load uploaded reference databases
-    laws_text = _load_reference_text(LAWS_DIR)
-    policies_text = _load_reference_text(POLICIES_DIR)
-    findings = analyze_text(contract_text)
+    selected_law_ids = _parse_selected_laws(selected_laws)
+
+    # Load uploaded reference databases according to the user's selected scope.
+    laws_text = _load_reference_text(LAWS_DIR) if selected_law_ids else ""
+    policies_text = _load_reference_text(POLICIES_DIR) if include_company_policy else ""
+    findings = analyze_text(contract_text, selected_laws=selected_law_ids)
     risk_score = calculate_risk_score(findings)
     risk_level = risk_level_from_score(risk_score)
     llm_review = await review_with_llm(
@@ -134,11 +183,14 @@ async def analyze_contract(
         language=language,
         laws_text=laws_text,
         policies_text=policies_text,
+        selected_laws=_selected_law_labels(selected_law_ids),
+        include_company_policy=include_company_policy,
     )
 
+    flagged_count = len([finding for finding in findings if finding.severity != "low"])
     summary = (
-        f"Found {len(findings)} potential hidden/risky clauses."
-        if findings
+        f"Found {flagged_count} potential hidden/risky clauses."
+        if flagged_count
         else "No hidden/risky clauses were detected by the current rule set."
     )
 
@@ -231,6 +283,70 @@ async def analyze_contract(
         date=db_contract.get("date") if db_contract else None,
         time=db_contract.get("time") if db_contract else None,
         is_automated=False
+    )
+
+@app.post("/api/contracts/analyze-text", response_model=ContractAnalysisResponse)
+async def analyze_contract_text(request: ContractTextAnalyzeRequest) -> ContractAnalysisResponse:
+    contract_text = request.contract_text.strip()
+    if not contract_text:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Edited contract text is empty.",
+        )
+
+    selected_law_ids = _normalise_selected_laws(request.selected_laws)
+    laws_text = _load_reference_text(LAWS_DIR) if selected_law_ids else ""
+    policies_text = _load_reference_text(POLICIES_DIR) if request.include_company_policy else ""
+    findings = analyze_text(contract_text, selected_laws=selected_law_ids)
+    risk_score = calculate_risk_score(findings)
+    risk_level = risk_level_from_score(risk_score)
+    llm_review = await review_with_llm(
+        api_key=settings.openai_api_key,
+        model=settings.openai_model,
+        gemini_api_key=settings.gemini_api_key,
+        gemini_model=settings.gemini_model,
+        contract_text=contract_text,
+        findings=findings,
+        jurisdiction=request.jurisdiction,
+        language=request.language,
+        laws_text=laws_text,
+        policies_text=policies_text,
+        selected_laws=_selected_law_labels(selected_law_ids),
+        include_company_policy=request.include_company_policy,
+    )
+
+    summary = (
+        f"Found {len([f for f in findings if f.severity != 'low'])} potential hidden/risky clauses."
+        if findings
+        else "No hidden/risky clauses were detected by the current rule set."
+    )
+    db_findings = [f.model_dump() for f in findings]
+    db_llm_review = llm_review.model_dump() if llm_review else None
+    db_id = save_contract({
+        "file_name": request.file_name or "edited-contract.txt",
+        "summary": summary,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "findings": db_findings,
+        "llm_review": db_llm_review,
+        "contract_text": contract_text,
+        "is_automated": False,
+    })
+    db_contract = get_contract_by_id(db_id)
+
+    return ContractAnalysisResponse(
+        id=db_id,
+        file_name=request.file_name or "edited-contract.txt",
+        summary=summary,
+        risk_score=risk_score,
+        risk_level=risk_level,
+        findings=findings,
+        llm_review=llm_review,
+        contract_text=contract_text,
+        company=db_contract.get("company") if db_contract else "—",
+        date=db_contract.get("date") if db_contract else None,
+        time=db_contract.get("time") if db_contract else None,
+        is_automated=False,
     )
 
 @app.get("/api/reference/files")

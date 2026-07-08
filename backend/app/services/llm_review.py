@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from app.models import ClauseFinding, LlmReview
 from app.services.clause_splitter import split_into_sections, to_numbered_lines
+from app.services.llm_client import ProviderConfig, build_provider_chain, call_with_fallback
 from app.services.retrieval import build_reference_context
-from app.services.llm_client import build_provider_chain, call_with_fallback, ProviderConfig
 
 # Per-call contract-text budget. Long contracts are split into multiple
-# batches instead of being silently truncated after the first ~12,000
-# characters (the original bug: anything past that point was never
-# reviewed, but nothing told the user or the model that).
+# batches instead of being silently truncated.
 REVIEW_BATCH_CHAR_BUDGET = 9000
-
-REVIEW_TEMPERATURE = 0  # deterministic judgement task, not creative writing
+REVIEW_TEMPERATURE = 0
 
 
 async def review_with_llm(
@@ -26,8 +23,9 @@ async def review_with_llm(
     language: str | None,
     laws_text: str = "",
     policies_text: str = "",
+    selected_laws: list[str] | None = None,
+    include_company_policy: bool = True,
 ) -> LlmReview | None:
-
     providers = build_provider_chain(
         openai_api_key=api_key,
         openai_model=model,
@@ -36,27 +34,35 @@ async def review_with_llm(
     )
 
     if not providers:
-        print("[llm_review] No OPENAI_API_KEY or GEMINI_API_KEY configured — using offline mode.")
-        return _offline_fallback_review(findings)
+        print("[llm_review] No OPENAI_API_KEY or GEMINI_API_KEY configured - using offline mode.")
+        return _offline_fallback_review(
+            findings,
+            selected_laws=selected_laws,
+            include_company_policy=include_company_policy,
+        )
 
     try:
-        import openai  # noqa: F401  — presence check; ImportError handled below
+        import openai  # noqa: F401
     except ImportError as import_exc:
         print(f"[llm_review] Failed to import OpenAI-compatible client library: {import_exc!r}")
-        return _offline_fallback_review(findings)
+        return _offline_fallback_review(
+            findings,
+            selected_laws=selected_laws,
+            include_company_policy=include_company_policy,
+        )
 
     finding_summary = "\n".join(
         f"- {finding.severity.upper()} {finding.title}: {finding.excerpt}" for finding in findings
     ) or "- No deterministic rule findings."
 
-    # Retrieval instead of blind head-truncation: pull the law/policy
-    # passages most relevant to THIS contract, not just whatever happens
-    # to sit in the first N characters of the reference database.
     laws_context, policies_context = build_reference_context(
-        contract_text, laws_text, policies_text, top_k=5
+        contract_text,
+        laws_text,
+        policies_text if include_company_policy else "",
+        top_k=5,
     )
-
     batches = _build_review_batches(contract_text, max_chars=REVIEW_BATCH_CHAR_BUDGET)
+    scope = _scope_context(selected_laws, include_company_policy)
 
     try:
         if len(batches) <= 1:
@@ -68,6 +74,7 @@ async def review_with_llm(
                 policies_context=policies_context,
                 jurisdiction=jurisdiction,
                 language=language,
+                scope=scope,
             )
         else:
             review_text, used_provider = await _run_batched_review(
@@ -78,21 +85,29 @@ async def review_with_llm(
                 policies_context=policies_context,
                 jurisdiction=jurisdiction,
                 language=language,
+                scope=scope,
             )
         return LlmReview(provider=used_provider.name, model=used_provider.model, review=review_text)
     except Exception as exc:
-        # If EVERY configured provider fails (bad keys, rate limit, network,
-        # etc.), don't crash the whole scan — fall back to rule-based findings only.
         print(f"[llm_review] All configured providers failed, falling back to offline mode: {exc!r}")
-        return _offline_fallback_review(findings, exc)
+        return _offline_fallback_review(
+            findings,
+            exc,
+            selected_laws=selected_laws,
+            include_company_policy=include_company_policy,
+        )
+
+
+def _scope_context(selected_laws: list[str] | None, include_company_policy: bool) -> dict[str, str]:
+    selected_law_label = ", ".join(selected_laws or []) or "No Malaysian law buttons selected"
+    policy_scope = "Included" if include_company_policy else "Excluded by user selection"
+    return {
+        "selected_law_label": selected_law_label,
+        "policy_scope": policy_scope,
+    }
 
 
 def _build_review_batches(contract_text: str, *, max_chars: int) -> list[str]:
-    """
-    Splits the contract into numbered-clause batches, each within
-    max_chars, so a long contract is fully reviewed across multiple
-    calls instead of the tail being silently dropped.
-    """
     sections = split_into_sections(contract_text)
     flat_lines = to_numbered_lines(sections)
 
@@ -124,6 +139,7 @@ def _review_prompt(
     policies_context: str,
     jurisdiction: str | None,
     language: str | None,
+    scope: dict[str, str],
     *,
     part_note: str = "",
 ) -> str:
@@ -134,6 +150,10 @@ Do not provide legal advice. Provide practical compliance review guidance.
 
 Jurisdiction: {jurisdiction or "not specified"}
 Preferred language: {language or "same as contract/user"}
+Selected legal scope: {scope["selected_law_label"]}
+Company policy scope: {scope["policy_scope"]}
+
+Only assess the contract against the selected legal scope and the company policy scope above. Do not flag issues under laws or company policy sources that the user excluded.
 
 Grounding rules (follow strictly):
 - The contract below is numbered as [Clause X.Y]. Every specific issue you raise MUST cite the exact clause id(s) it comes from, e.g. "(Clause 4.2)". If a point is not tied to a specific clause, say so explicitly instead of inventing a clause number.
@@ -142,12 +162,12 @@ Grounding rules (follow strictly):
 {part_note}
 
 Reference Malaysian Laws database (most relevant excerpts for this contract):
-{laws_context or "No specific law database documents uploaded, or no relevant match found. Use general knowledge of Malaysian law and flag this clearly."}
+{laws_context or "No Malaysian law database was selected, or no relevant match was found."}
 
 Reference Company Policy rules & regulations (most relevant excerpts for this contract):
-{policies_context or "No specific company policy documents uploaded, or no relevant match found."}
+{policies_context or "Company policy was not selected, no policy document is linked, or no relevant match was found."}
 
-Deterministic rule-engine findings (already computed — cross-check these against your own read, don't just repeat them):
+Deterministic rule-engine findings (already computed - cross-check these against your own read, don't just repeat them):
 {finding_summary}
 
 Numbered contract text:
@@ -155,7 +175,7 @@ Numbered contract text:
 
 Return:
 1. Executive summary
-2. Hidden/risky clauses missed or confirmed — cite clause id for every point (especially contradictions with the reference Malaysian laws or Company Policy)
+2. Hidden/risky clauses missed or confirmed - cite clause id for every point
 3. Questions for legal/compliance team
 4. Recommended negotiation actions
 """.strip()
@@ -170,9 +190,16 @@ async def _run_single_review(
     policies_context: str,
     jurisdiction: str | None,
     language: str | None,
+    scope: dict[str, str],
 ) -> tuple[str, ProviderConfig]:
     prompt = _review_prompt(
-        contract_section, finding_summary, laws_context, policies_context, jurisdiction, language
+        contract_section,
+        finding_summary,
+        laws_context,
+        policies_context,
+        jurisdiction,
+        language,
+        scope,
     )
     return await call_with_fallback(
         providers,
@@ -191,14 +218,8 @@ async def _run_batched_review(
     policies_context: str,
     jurisdiction: str | None,
     language: str | None,
+    scope: dict[str, str],
 ) -> tuple[str, ProviderConfig]:
-    """
-    Map-reduce for long contracts: review each batch of clauses
-    independently (so nothing gets silently dropped), then synthesize
-    the partial reviews into one consolidated report. Each call goes
-    through the same OpenAI→Gemini fallback chain, so a mid-review
-    provider outage doesn't abandon the whole scan.
-    """
     total = len(batches)
     partial_reviews: list[str] = []
     last_provider: ProviderConfig | None = None
@@ -209,7 +230,14 @@ async def _run_batched_review(
             "Only review the clauses shown in THIS part; do not comment on parts not shown."
         )
         prompt = _review_prompt(
-            batch, finding_summary, laws_context, policies_context, jurisdiction, language, part_note=part_note
+            batch,
+            finding_summary,
+            laws_context,
+            policies_context,
+            jurisdiction,
+            language,
+            scope,
+            part_note=part_note,
         )
         text, used_provider = await call_with_fallback(
             providers,
@@ -231,6 +259,7 @@ Grounding rules:
 - Every specific issue must keep its original clause id citation from the partial reviews below.
 - Do not invent new issues that are not present in the partial reviews.
 - Merge duplicate/overlapping points instead of repeating them.
+- Preserve this selected scope: {scope["selected_law_label"]}; company policy: {scope["policy_scope"]}.
 
 Partial reviews:
 {chr(10).join(partial_reviews)}
@@ -251,13 +280,19 @@ Return ONE consolidated review with these sections:
     return (text.strip() or "\n\n".join(partial_reviews)), used_provider
 
 
-def _offline_fallback_review(findings: list[ClauseFinding], exc: Exception | None = None) -> LlmReview:
+def _offline_fallback_review(
+    findings: list[ClauseFinding],
+    exc: Exception | None = None,
+    *,
+    selected_laws: list[str] | None = None,
+    include_company_policy: bool = True,
+) -> LlmReview:
     critical_count = sum(1 for f in findings if f.severity in ["critical", "high"])
     medium_count = sum(1 for f in findings if f.severity == "medium")
 
     error_msg = f" ({exc})" if exc else ""
     fallback_review = f"""
-### ⚠️ Compliance Review Summary (Offline Fallback Mode)
+### Compliance Review Summary (Offline Fallback Mode)
 *Note: AI cloud review is currently offline{error_msg}. Generating local deterministic rule review.*
 
 #### 1. Executive Summary
@@ -267,18 +302,24 @@ We have completed a compliance scan of the uploaded contract. A total of {len(fi
 """
     flagged = [f for f in findings if f.severity != "low"]
     if flagged:
-        for f in flagged[:5]:
-            fallback_review += f"\n- **{f.title} ({f.severity.upper()})**: {f.explanation}\n  *Recommendation*: {f.recommendation}"
+        for finding in flagged[:5]:
+            fallback_review += f"\n- **{finding.title} ({finding.severity.upper()})**: {finding.explanation}\n  *Recommendation*: {finding.recommendation}"
     else:
         fallback_review += "\n- No compliance flags or risks were detected in the contract."
 
-    fallback_review += """
+    fallback_review += "\n\n#### 3. Selected Compliance Checklist\n"
+    selected_laws = selected_laws or []
+    if "Employment Act 1955" in selected_laws:
+        fallback_review += "- **Employment Act 1955**: Verify that working hours do not exceed 45 hours/week and overtime/public-holiday/leave terms follow statutory requirements.\n"
+    if "PDPA 2010" in selected_laws:
+        fallback_review += "- **PDPA 2010**: Confirm there is a clear personal data notice, consent basis where required, and no blanket waiver of statutory rights.\n"
+    if "Companies Act 2016" in selected_laws:
+        fallback_review += "- **Companies Act 2016**: Check that director/entity authority and execution authority are clearly defined.\n"
+    if include_company_policy:
+        fallback_review += "- **Company policy**: Compare the contract against the linked internal policy database where policy text is available.\n"
+    if not selected_laws and not include_company_policy:
+        fallback_review += "- No law or company policy source was selected for this scan.\n"
 
-#### 3. General Malaysian Compliance Checklist
-- **Employment Act 1955**: Verify that working hours do not exceed 45 hours/week, and overtime rates (1.5x / 2.0x / 3.0x) are statutory.
-- **PDPA 2010**: Confirm there is a clear personal data consent and disclosure clause.
-- **Companies Act 2016**: Check if director/entity authority is fully defined.
-"""
     return LlmReview(
         provider="local-fallback",
         model="deterministic-heuristics",
