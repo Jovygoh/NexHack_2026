@@ -79,6 +79,25 @@ def test_chat_endpoint_no_key() -> None:
     assert "ContractSense AI" in reply
     assert "compliance" in reply.lower()
 
+def test_analyze_text_endpoint_rescans_edited_contract() -> None:
+    from app.db import init_db, clear_all_contracts
+    init_db()
+    clear_all_contracts()
+
+    payload = {
+        "file_name": "edited_contract.txt",
+        "contract_text": "1.1 The Employee shall work 60 hours per week as normal working hours.",
+        "jurisdiction": "Malaysia",
+        "language": "English"
+    }
+
+    response = client.post("/api/contracts/analyze-text", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["file_name"] == "edited_contract.txt"
+    assert any(f["id"].startswith("excessive-working-hours") for f in body["findings"])
+
 def test_search_and_edit_endpoints() -> None:
     from app.db import init_db, clear_all_contracts, save_contract, get_contract_by_id
     init_db()

@@ -15,18 +15,22 @@ async def review_with_llm(
     language: str | None,
     laws_text: str = "",
     policies_text: str = "",
+    selected_laws: list[str] | None = None,
+    include_company_policy: bool = True,
 ) -> LlmReview | None:
 
     has_openai = bool(api_key)
     has_gemini = bool(gemini_api_key)
+    selected_law_label = ", ".join(selected_laws or []) or "No Malaysian law buttons selected"
+    policy_scope = "Included" if include_company_policy else "Excluded by user selection"
 
     if not has_openai and not has_gemini:
-        return _offline_fallback_review(findings)
+        return _offline_fallback_review(findings, selected_laws=selected_laws, include_company_policy=include_company_policy)
 
     try:
         from openai import AsyncOpenAI
     except ImportError:
-        return _offline_fallback_review(findings)
+        return _offline_fallback_review(findings, selected_laws=selected_laws, include_company_policy=include_company_policy)
 
     if has_openai:
         client = AsyncOpenAI(api_key=api_key)
@@ -42,7 +46,6 @@ async def review_with_llm(
     finding_summary = "\n".join(
         f"- {finding.severity.upper()} {finding.title}: {finding.excerpt}" for finding in findings
     ) or "- No deterministic rule findings."
-
     prompt = f"""
 You are an enterprise contract compliance screening assistant.
 Your job is to identify hidden clauses, unusual enterprise risk, and review points.
@@ -50,12 +53,16 @@ Do not provide legal advice. Provide practical compliance review guidance.
 
 Jurisdiction: {jurisdiction or "not specified"}
 Preferred language: {language or "same as contract/user"}
+Selected legal scope: {selected_law_label}
+Company policy scope: {policy_scope}
+
+Only assess the contract against the selected legal scope and the company policy scope above. Do not flag issues under laws or company policy sources that the user excluded.
 
 Reference Malaysian Laws database uploaded by the user:
-{laws_text or "No specific law database documents uploaded. Use your general knowledge of Malaysian company law."}
+{laws_text or "No Malaysian law database selected for this scan."}
 
 Reference Company Policy rules & regulations uploaded by the user:
-{policies_text or "No specific company policy documents uploaded."}
+{policies_text or "Company policy was not selected or no policy document is linked."}
 
 Rule findings:
 {finding_summary}
@@ -82,10 +89,16 @@ Return:
     except Exception as exc:
         # If the AI call fails (bad key, rate limit, network, etc.),
         # don't crash the whole scan — fall back to rule-based findings only.
-        return _offline_fallback_review(findings, exc)
+        return _offline_fallback_review(findings, exc, selected_laws=selected_laws, include_company_policy=include_company_policy)
 
 
-def _offline_fallback_review(findings: list[ClauseFinding], exc: Exception | None = None) -> LlmReview:
+def _offline_fallback_review(
+    findings: list[ClauseFinding],
+    exc: Exception | None = None,
+    *,
+    selected_laws: list[str] | None = None,
+    include_company_policy: bool = True,
+) -> LlmReview:
     critical_count = sum(1 for f in findings if f.severity in ["critical", "high"])
     medium_count = sum(1 for f in findings if f.severity == "medium")
     
@@ -106,13 +119,18 @@ We have completed a compliance scan of the uploaded contract. A total of {len(fi
     else:
         fallback_review += "\n- No compliance flags or risks were detected in the contract."
 
-    fallback_review += """
-
-#### 3. General Malaysian Compliance Checklist
-- **Employment Act 1955**: Verify that working hours do not exceed 45 hours/week, and overtime rates (1.5x / 2.0x / 3.0x) are statutory.
-- **PDPA 2010**: Confirm there is a clear personal data consent and disclosure clause.
-- **Companies Act 2016**: Check if director/entity authority is fully defined.
-"""
+    fallback_review += "\n\n#### 3. Selected Compliance Checklist\n"
+    selected_laws = selected_laws or []
+    if "Employment Act 1955" in selected_laws:
+        fallback_review += "- **Employment Act 1955**: Verify that working hours do not exceed 45 hours/week and overtime/public-holiday/leave terms follow statutory requirements.\n"
+    if "PDPA 2010" in selected_laws:
+        fallback_review += "- **PDPA 2010**: Confirm there is a clear personal data notice, consent basis where required, and no blanket waiver of statutory rights.\n"
+    if "Companies Act 2016" in selected_laws:
+        fallback_review += "- **Companies Act 2016**: Check that director/entity authority and execution authority are clearly defined.\n"
+    if include_company_policy:
+        fallback_review += "- **Company policy**: Compare the contract against the linked internal policy database where policy text is available.\n"
+    if not selected_laws and not include_company_policy:
+        fallback_review += "- No law or company policy source was selected for this scan.\n"
     return LlmReview(
         provider="local-fallback",
         model="deterministic-heuristics",

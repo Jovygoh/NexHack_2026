@@ -459,6 +459,9 @@ function isAiErrorText(text) {
 let _selectedFile = null;
 let _selectedFiles = [];
 let _pendingBatchContracts = [];
+let _companyPolicyLinked = false;
+let _companyPolicyIncluded = false;
+let _lastPolicySourceStatus = null;
 
 function handleFile(input) {
   if (!input.files || !input.files.length) return;
@@ -492,7 +495,37 @@ function removeFile() {
   document.getElementById('file-input').value = '';
 }
 
-function togglePill(el) { el.classList.toggle('active'); }
+function togglePill(el) { toggleLawPill(el); }
+
+function toggleLawPill(el) {
+  if (!el) return;
+  el.classList.toggle('active');
+}
+
+function getSelectedAnalysisScope() {
+  const selectedLaws = Array.from(document.querySelectorAll('.rule-pill[data-law-id].active'))
+    .map(el => el.dataset.lawId)
+    .filter(Boolean);
+  return {
+    selectedLaws,
+    includeCompanyPolicy: Boolean(_companyPolicyLinked && _companyPolicyIncluded),
+  };
+}
+
+function appendAnalysisScope(formData) {
+  const scope = getSelectedAnalysisScope();
+  formData.append('selected_laws', JSON.stringify(scope.selectedLaws));
+  formData.append('include_company_policy', scope.includeCompanyPolicy ? 'true' : 'false');
+}
+
+function toggleCompanyPolicyPill() {
+  if (!_companyPolicyLinked) {
+    openPolicyLinkModal();
+    return;
+  }
+  _companyPolicyIncluded = !_companyPolicyIncluded;
+  renderCompanyPolicySelection();
+}
 
 async function loadPolicySourceStatus() {
   const statusEl = document.getElementById('policy-source-status');
@@ -515,11 +548,29 @@ function updatePolicySourceUi(status) {
   const pill = document.getElementById('company-policy-pill');
   if (!statusEl || !pill) return;
 
-  pill.classList.toggle('active', status.sync_status === 'up_to_date');
+  _lastPolicySourceStatus = status || {};
+  _companyPolicyLinked = status.sync_status === 'up_to_date';
+  if (_companyPolicyLinked && !_companyPolicyIncluded) {
+    _companyPolicyIncluded = true;
+  }
+  if (!_companyPolicyLinked) {
+    _companyPolicyIncluded = false;
+  }
+  renderCompanyPolicySelection();
+}
+
+function renderCompanyPolicySelection() {
+  const statusEl = document.getElementById('policy-source-status');
+  const pill = document.getElementById('company-policy-pill');
+  const status = _lastPolicySourceStatus || {};
+  if (!statusEl || !pill) return;
+
+  pill.classList.toggle('active', _companyPolicyLinked && _companyPolicyIncluded);
   statusEl.className = 'policy-source-status';
   if (status.sync_status === 'up_to_date') {
     statusEl.classList.add('linked');
-    statusEl.textContent = `Company policy linked · v${status.version || 1} · ${status.message || 'Up to date'}`;
+    const mode = _companyPolicyIncluded ? 'included in scan' : 'excluded from scan';
+    statusEl.textContent = `Company policy linked - ${mode} - v${status.version || 1} - ${status.message || 'Up to date'}`;
   } else if (status.sync_status === 'error') {
     statusEl.classList.add('error');
     statusEl.textContent = status.message || 'Company policy sync has an error.';
@@ -570,7 +621,6 @@ async function linkCompanyPolicySource() {
     if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
 
     updatePolicySourceUi(data);
-    status.textContent = data.message || 'Company policy linked successfully.';
     status.className = data.sync_status === 'error' ? 'policy-modal-status error' : 'policy-modal-status ok';
     if (data.sync_status !== 'error') {
       setTimeout(closePolicyLinkModal, 700);
@@ -623,6 +673,7 @@ async function startScan() {
     formData.append('file', _selectedFile);
     formData.append('jurisdiction', 'Malaysia');
     formData.append('language', 'English');
+    appendAnalysisScope(formData);
 
     const response = await fetch(`${API_BASE}/api/contracts/analyze`, {
       method: 'POST',
@@ -669,6 +720,7 @@ async function analyzeSingleFile(file) {
   formData.append('file', file);
   formData.append('jurisdiction', 'Malaysia');
   formData.append('language', 'English');
+  appendAnalysisScope(formData);
 
   const response = await fetch(`${API_BASE}/api/contracts/analyze`, {
     method: 'POST',
@@ -691,6 +743,11 @@ function contractHasIssues(contract) {
 async function startScan() {
   const filesToScan = _selectedFiles.length ? _selectedFiles : (_selectedFile ? [_selectedFile] : []);
   if (!filesToScan.length) return;
+  const scope = getSelectedAnalysisScope();
+  if (!scope.selectedLaws.length && !scope.includeCompanyPolicy) {
+    alert('Select at least one law or include company policy before scanning.');
+    return;
+  }
 
   const btn = document.getElementById('scan-btn');
   const bar = document.getElementById('progress-bar');
@@ -1990,6 +2047,62 @@ async function saveEditorChanges() {
   } catch (err) {
     console.error('Save failed:', err);
     alert(`Failed to save changes: ${err.message}`);
+  }
+}
+
+async function rescanEditedContract() {
+  if (!_activeContract) return;
+
+  const btn = document.getElementById('rescan-edited-btn');
+  const originalText = btn ? btn.textContent : '';
+  const newText = getCurrentContractTextForExport().trim();
+  if (!newText) {
+    alert('Edited contract text is empty.');
+    return;
+  }
+
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Rescanning...';
+    }
+
+    const res = await fetch(`${API_BASE}/api/contracts/analyze-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_name: _activeContract.filename || 'edited-contract.txt',
+        contract_text: newText,
+        jurisdiction: 'Malaysia',
+        language: 'English',
+        selected_laws: getSelectedAnalysisScope().selectedLaws,
+        include_company_policy: getSelectedAnalysisScope().includeCompanyPolicy,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    const rescanned = mapApiResponseToContract(data, { name: data.file_name || _activeContract.filename });
+    _activeContract = rescanned;
+    _chatHistory = [];
+    SCAN_HISTORY.unshift(rescanned);
+    saveLocalScanHistory();
+    buildHistoryList();
+
+    document.getElementById('page-editor').classList.remove('active');
+    document.getElementById('page-scanner').classList.add('active');
+    document.getElementById('results-view').classList.remove('show');
+    document.getElementById('safe-result').classList.remove('show');
+    showResults(rescanned);
+  } catch (err) {
+    console.error('Rescan failed:', err);
+    alert(`Rescan failed: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText || 'Rescan edited';
+    }
   }
 }
 

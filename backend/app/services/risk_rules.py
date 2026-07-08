@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Literal
 
 from app.models import ClauseFinding
@@ -104,6 +105,84 @@ RISK_RULES: tuple[RiskRule, ...] = (
         rewrite="After termination, the Employee shall remain bound by confidentiality obligations and shall not misuse the Company's trade secrets or confidential information, but nothing in this Agreement prevents the Employee from lawful employment or business activity.",
     ),
     RiskRule(
+        id="no-overtime-premium",
+        category="Employment",
+        title="Overtime premium missing",
+        severity="critical",
+        patterns=(
+            r"overtime.{0,80}(?:standard|normal|ordinary)\s+(?:hourly\s+)?rate.{0,80}(?:no|without)\s+(?:additional\s+)?premium",
+            r"overtime.{0,80}(?:no|without)\s+(?:additional\s+)?(?:premium|extra pay|overtime rate)",
+        ),
+        explanation="The clause appears to remove or reduce statutory overtime premium treatment.",
+        recommendation="State that overtime will be paid at the applicable statutory overtime rate under Malaysian employment law.",
+        law_section="Employment Act 1955 (Section 60A)",
+        law_text="Section 60A regulates hours of work and overtime. Overtime should be paid at the applicable statutory rate rather than ordinary pay only.",
+        rewrite="Overtime shall be compensated at the applicable statutory overtime rate in accordance with Section 60A of the Employment Act 1955 and related regulations.",
+    ),
+    RiskRule(
+        id="public-holiday-no-pay",
+        category="Employment",
+        title="Public holiday work without statutory pay",
+        severity="critical",
+        patterns=(
+            r"public holidays?.{0,80}(?:without|no)\s+(?:additional\s+)?(?:compensation|pay|payment)",
+            r"work on public holidays?.{0,80}(?:standard|normal|ordinary)\s+rate",
+        ),
+        explanation="The clause appears to require work on public holidays without the statutory additional compensation.",
+        recommendation="Provide public holiday pay in accordance with Malaysian statutory requirements.",
+        law_section="Employment Act 1955 (Section 60D)",
+        law_text="Section 60D regulates holidays and work on holidays, including payment treatment for employees required to work on a holiday.",
+        rewrite="If the Employee is required to work on a public holiday, the Employee shall be paid in accordance with Section 60D of the Employment Act 1955.",
+    ),
+    RiskRule(
+        id="insufficient-annual-leave",
+        category="Employment",
+        title="Annual leave below statutory minimum",
+        severity="high",
+        patterns=(
+            r"annual leave.{0,60}(?:[0-7])\s+days?",
+            r"(?:[0-7])\s+days?.{0,40}annual leave",
+            r"(?:entitled|entitlement).{0,40}(?:[0-7])\s+days?.{0,40}annual leave",
+        ),
+        explanation="The annual leave entitlement appears to be below the Malaysian statutory minimum.",
+        recommendation="Set annual leave at least to the statutory minimum and vary it by length of service where required.",
+        law_section="Employment Act 1955 (Section 60E)",
+        law_text="Section 60E provides statutory annual leave entitlements, including minimum days based on length of service.",
+        rewrite="Annual leave shall be granted at not less than the statutory minimum required under Section 60E of the Employment Act 1955, including service-based increases where applicable.",
+    ),
+    RiskRule(
+        id="insufficient-sick-leave",
+        category="Employment",
+        title="Sick leave below statutory minimum",
+        severity="high",
+        patterns=(
+            r"sick leave.{0,60}(?:[0-9]|1[0-3])\s+days?",
+            r"(?:[0-9]|1[0-3])\s+days?.{0,40}sick leave",
+            r"(?:entitled|entitlement).{0,40}(?:[0-9]|1[0-3])\s+days?.{0,40}sick leave",
+        ),
+        explanation="The sick leave entitlement appears to be below the Malaysian statutory minimum.",
+        recommendation="Set sick leave at least to the statutory minimum and distinguish hospitalization entitlement where applicable.",
+        law_section="Employment Act 1955 (Section 60F)",
+        law_text="Section 60F provides statutory sick leave entitlements, including non-hospitalization and hospitalization leave.",
+        rewrite="Sick leave shall be granted at not less than the statutory minimum required under Section 60F of the Employment Act 1955.",
+    ),
+    RiskRule(
+        id="unclear-company-execution-authority",
+        category="Corporate authority",
+        title="Company execution authority is unclear",
+        severity="high",
+        patterns=(
+            r"(?:any employee|any staff).{0,80}(?:bind|execute|sign).{0,80}(?:company|corporation)",
+            r"(?:bind|execute|sign).{0,80}(?:company|corporation).{0,80}without.{0,40}(?:director|board|authori[sz]ed)",
+            r"no\s+(?:board|director|authori[sz]ed signatory)\s+(?:approval|authority).{0,80}(?:required|needed)",
+        ),
+        explanation="The clause appears to let a company be bound without clear board, director, or authorised-signatory authority.",
+        recommendation="Require execution by directors, authorised signatories, or another clearly approved company representative.",
+        law_section="Companies Act 2016 (Section 66)",
+        law_text="Section 66 addresses company execution of documents. Contracts should clearly identify authority to execute or bind the company.",
+        rewrite="This Agreement shall be executed only by directors or duly authorised signatories with authority to bind the Company in accordance with the Companies Act 2016.",
+    ),
+    RiskRule(
         id="hidden-fees",
         category="Fees and payment",
         title="Potential hidden fees or pass-through charges",
@@ -149,6 +228,21 @@ RISK_RULES: tuple[RiskRule, ...] = (
         law_section="PDPA 2010 (Section 6 - General Principle)",
         law_text="6. (1) A data user shall not, in the case of personal data other than sensitive personal data, process personal data about a data subject unless the data subject has given his consent to the processing of the personal data.",
         rewrite="The processing of personal data shall be limited strictly to the performance of the services, and shall not be shared with third parties without prior written consent.",
+    ),
+    RiskRule(
+        id="pdpa-rights-waiver",
+        category="Data and privacy",
+        title="Attempted waiver of PDPA rights",
+        severity="critical",
+        patterns=(
+            r"waive(?:s|d)?\s+all\s+rights\s+under\s+(?:the\s+)?(?:personal data protection act|pdpa)",
+            r"(?:personal data protection act|pdpa).{0,80}(?:rights|protections).{0,40}(?:waived|do not apply|shall not apply)",
+        ),
+        explanation="The clause attempts to waive statutory personal data rights or protections.",
+        recommendation="Remove the waiver and instead describe lawful purposes, notices, consent, access/correction rights, retention, and security safeguards.",
+        law_section="PDPA 2010 (Act 709)",
+        law_text="PDPA 2010 regulates commercial processing of personal data and includes statutory principles and data subject rights that should not be removed by blanket contract waiver.",
+        rewrite="Nothing in this Agreement limits any rights or protections available under the Personal Data Protection Act 2010. Personal data shall be processed only for lawful, specific, and notified purposes.",
     ),
     RiskRule(
         id="exclusive-remedy",
@@ -244,7 +338,15 @@ RISK_RULES: tuple[RiskRule, ...] = (
 )
 
 
-def analyze_text(text: str) -> list[ClauseFinding]:
+SELECTABLE_LAW_IDS = ("employment", "pdpa", "companies")
+LAW_SECTION_MARKERS = {
+    "employment": ("employment act",),
+    "pdpa": ("pdpa", "personal data protection"),
+    "companies": ("companies act",),
+}
+
+
+def analyze_text(text: str, selected_laws: Iterable[str] | None = None) -> list[ClauseFinding]:
     """
     Splits the contract into its real numbered sections/clauses, then runs
     every rule against each clause individually. Returns one ClauseFinding
@@ -253,6 +355,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
     by the frontend.
     """
     sections = split_into_sections(text)
+    selected_law_ids = _normalise_selected_laws(selected_laws)
     findings: list[ClauseFinding] = []
 
     for section in sections:
@@ -262,7 +365,7 @@ def analyze_text(text: str) -> list[ClauseFinding]:
             if not clean:
                 continue
 
-            matched_rule, excerpt, confidence = _match_clause(clean)
+            matched_rule, excerpt, confidence = _match_clause(clean, selected_law_ids)
 
             if matched_rule:
                 findings.append(
@@ -305,8 +408,30 @@ def analyze_text(text: str) -> list[ClauseFinding]:
     return findings
 
 
-def _match_clause(clean_line: str) -> tuple[RiskRule | None, str, float]:
+def _normalise_selected_laws(selected_laws: Iterable[str] | None) -> set[str] | None:
+    if selected_laws is None:
+        return None
+    return {
+        str(law).strip().lower()
+        for law in selected_laws
+        if str(law).strip().lower() in SELECTABLE_LAW_IDS
+    }
+
+
+def _rule_matches_selected_laws(rule: RiskRule, selected_law_ids: set[str] | None) -> bool:
+    if selected_law_ids is None:
+        return True
+    section = rule.law_section.lower()
+    return any(
+        any(marker in section for marker in LAW_SECTION_MARKERS[law_id])
+        for law_id in selected_law_ids
+    )
+
+
+def _match_clause(clean_line: str, selected_law_ids: set[str] | None = None) -> tuple[RiskRule | None, str, float]:
     for rule in RISK_RULES:
+        if not _rule_matches_selected_laws(rule, selected_law_ids):
+            continue
         for pattern in rule.patterns:
             match = re.search(pattern, clean_line, re.IGNORECASE)
             if match:
