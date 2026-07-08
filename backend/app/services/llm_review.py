@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.models import ClauseFinding, LlmReview
 from app.services.clause_splitter import split_into_sections, to_numbered_lines
 from app.services.retrieval import build_reference_context
+from app.services.llm_client import build_provider_chain, call_with_fallback, ProviderConfig
 
 # Per-call contract-text budget. Long contracts are split into multiple
 # batches instead of being silently truncated after the first ~12,000
@@ -18,7 +19,7 @@ async def review_with_llm(
     api_key: str,
     model: str,
     gemini_api_key: str = "",
-    gemini_model: str = "gemini-1.5-flash",
+    gemini_model: str = "",
     contract_text: str,
     findings: list[ClauseFinding],
     jurisdiction: str | None,
@@ -27,28 +28,22 @@ async def review_with_llm(
     policies_text: str = "",
 ) -> LlmReview | None:
 
-    has_openai = bool(api_key)
-    has_gemini = bool(gemini_api_key)
+    providers = build_provider_chain(
+        openai_api_key=api_key,
+        openai_model=model,
+        gemini_api_key=gemini_api_key,
+        gemini_model=gemini_model,
+    )
 
-    if not has_openai and not has_gemini:
+    if not providers:
+        print("[llm_review] No OPENAI_API_KEY or GEMINI_API_KEY configured — using offline mode.")
         return _offline_fallback_review(findings)
 
     try:
-        from openai import AsyncOpenAI
-    except ImportError:
+        import openai  # noqa: F401  — presence check; ImportError handled below
+    except ImportError as import_exc:
+        print(f"[llm_review] Failed to import OpenAI-compatible client library: {import_exc!r}")
         return _offline_fallback_review(findings)
-
-    if has_openai:
-        client = AsyncOpenAI(api_key=api_key)
-        active_model = model
-        provider = "openai"
-    else:
-        client = AsyncOpenAI(
-            api_key=gemini_api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-        active_model = gemini_model or "gemini-1.5-flash"
-        provider = "gemini"
 
     finding_summary = "\n".join(
         f"- {finding.severity.upper()} {finding.title}: {finding.excerpt}" for finding in findings
@@ -65,9 +60,8 @@ async def review_with_llm(
 
     try:
         if len(batches) <= 1:
-            review_text = await _run_single_review(
-                client,
-                active_model,
+            review_text, used_provider = await _run_single_review(
+                providers,
                 contract_section=batches[0] if batches else "(No readable contract text.)",
                 finding_summary=finding_summary,
                 laws_context=laws_context,
@@ -76,9 +70,8 @@ async def review_with_llm(
                 language=language,
             )
         else:
-            review_text = await _run_batched_review(
-                client,
-                active_model,
+            review_text, used_provider = await _run_batched_review(
+                providers,
                 batches,
                 finding_summary=finding_summary,
                 laws_context=laws_context,
@@ -86,11 +79,11 @@ async def review_with_llm(
                 jurisdiction=jurisdiction,
                 language=language,
             )
-        return LlmReview(provider=provider, model=active_model, review=review_text)
+        return LlmReview(provider=used_provider.name, model=used_provider.model, review=review_text)
     except Exception as exc:
-        # If the AI call fails (bad key, rate limit, network, etc.),
-        # don't crash the whole scan — fall back to rule-based findings only.
-        print(f"[llm_review] Cloud LLM call failed, falling back to offline mode: {exc!r}")
+        # If EVERY configured provider fails (bad keys, rate limit, network,
+        # etc.), don't crash the whole scan — fall back to rule-based findings only.
+        print(f"[llm_review] All configured providers failed, falling back to offline mode: {exc!r}")
         return _offline_fallback_review(findings, exc)
 
 
@@ -169,8 +162,7 @@ Return:
 
 
 async def _run_single_review(
-    client,
-    active_model: str,
+    providers: list[ProviderConfig],
     *,
     contract_section: str,
     finding_summary: str,
@@ -178,21 +170,20 @@ async def _run_single_review(
     policies_context: str,
     jurisdiction: str | None,
     language: str | None,
-) -> str:
+) -> tuple[str, ProviderConfig]:
     prompt = _review_prompt(
         contract_section, finding_summary, laws_context, policies_context, jurisdiction, language
     )
-    response = await client.chat.completions.create(
-        model=active_model,
-        messages=[{"role": "user", "content": prompt}],
+    return await call_with_fallback(
+        providers,
+        [{"role": "user", "content": prompt}],
         temperature=REVIEW_TEMPERATURE,
+        log_prefix="llm_review",
     )
-    return response.choices[0].message.content or "No response from LLM."
 
 
 async def _run_batched_review(
-    client,
-    active_model: str,
+    providers: list[ProviderConfig],
     batches: list[str],
     *,
     finding_summary: str,
@@ -200,14 +191,17 @@ async def _run_batched_review(
     policies_context: str,
     jurisdiction: str | None,
     language: str | None,
-) -> str:
+) -> tuple[str, ProviderConfig]:
     """
     Map-reduce for long contracts: review each batch of clauses
     independently (so nothing gets silently dropped), then synthesize
-    the partial reviews into one consolidated report.
+    the partial reviews into one consolidated report. Each call goes
+    through the same OpenAI→Gemini fallback chain, so a mid-review
+    provider outage doesn't abandon the whole scan.
     """
     total = len(batches)
     partial_reviews: list[str] = []
+    last_provider: ProviderConfig | None = None
 
     for idx, batch in enumerate(batches, start=1):
         part_note = (
@@ -217,17 +211,18 @@ async def _run_batched_review(
         prompt = _review_prompt(
             batch, finding_summary, laws_context, policies_context, jurisdiction, language, part_note=part_note
         )
-        response = await client.chat.completions.create(
-            model=active_model,
-            messages=[{"role": "user", "content": prompt}],
+        text, used_provider = await call_with_fallback(
+            providers,
+            [{"role": "user", "content": prompt}],
             temperature=REVIEW_TEMPERATURE,
+            log_prefix="llm_review",
         )
-        text = (response.choices[0].message.content or "").strip()
-        if text:
-            partial_reviews.append(f"--- Part {idx}/{total} ---\n{text}")
+        last_provider = used_provider
+        if text.strip():
+            partial_reviews.append(f"--- Part {idx}/{total} ---\n{text.strip()}")
 
     if not partial_reviews:
-        return "No response from LLM."
+        return "No response from LLM.", (last_provider or providers[0])
 
     synthesis_prompt = f"""
 You are consolidating {total} partial compliance reviews of ONE long contract (each part covered different, non-overlapping clauses) into a single final review.
@@ -247,12 +242,13 @@ Return ONE consolidated review with these sections:
 4. Recommended negotiation actions
 """.strip()
 
-    response = await client.chat.completions.create(
-        model=active_model,
-        messages=[{"role": "user", "content": synthesis_prompt}],
+    text, used_provider = await call_with_fallback(
+        providers,
+        [{"role": "user", "content": synthesis_prompt}],
         temperature=REVIEW_TEMPERATURE,
+        log_prefix="llm_review",
     )
-    return (response.choices[0].message.content or "").strip() or "\n\n".join(partial_reviews)
+    return (text.strip() or "\n\n".join(partial_reviews)), used_provider
 
 
 def _offline_fallback_review(findings: list[ClauseFinding], exc: Exception | None = None) -> LlmReview:

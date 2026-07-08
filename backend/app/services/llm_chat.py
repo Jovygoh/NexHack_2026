@@ -5,6 +5,7 @@ import re
 from app.models import ClauseFinding
 from app.services.clause_splitter import format_structured_contract
 from app.services.retrieval import build_reference_context
+from app.services.llm_client import build_provider_chain, call_with_fallback
 
 
 MAX_CONTRACT_CHARS = 16000  # budget for the structured/numbered contract text
@@ -18,7 +19,7 @@ async def chat_with_llm(
     api_key: str,
     model: str,
     gemini_api_key: str = "",
-    gemini_model: str = "gemini-1.5-flash",
+    gemini_model: str = "",
     message: str,
     contract_text: str,
     findings: list[ClauseFinding],
@@ -30,10 +31,15 @@ async def chat_with_llm(
     if not user_message:
         return "Ask me a question about a contract, Malaysian law, or a clause you want to improve."
 
-    has_openai = bool(api_key)
-    has_gemini = bool(gemini_api_key)
+    providers = build_provider_chain(
+        openai_api_key=api_key,
+        openai_model=model,
+        gemini_api_key=gemini_api_key,
+        gemini_model=gemini_model,
+    )
 
-    if not has_openai and not has_gemini:
+    if not providers:
+        print("[llm_chat] No OPENAI_API_KEY or GEMINI_API_KEY configured — using offline mode.")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
@@ -43,8 +49,9 @@ async def chat_with_llm(
         )
 
     try:
-        from openai import AsyncOpenAI
-    except ImportError:
+        import openai  # noqa: F401  — presence check; ImportError handled below
+    except ImportError as import_exc:
+        print(f"[llm_chat] Failed to import OpenAI-compatible client library: {import_exc!r}")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
@@ -53,18 +60,6 @@ async def chat_with_llm(
             policies_text=policies_text,
             error=RuntimeError("OpenAI-compatible client library is not installed."),
         )
-
-    if has_openai:
-        client = AsyncOpenAI(api_key=api_key)
-        active_model = model
-        provider_name = "OpenAI"
-    else:
-        client = AsyncOpenAI(
-            api_key=gemini_api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-        active_model = gemini_model or "gemini-1.5-flash"
-        provider_name = "Gemini"
 
     # Structured, numbered contract text (with explicit truncation marker
     # if it's still too long) instead of a raw blob silently cut at
@@ -136,16 +131,16 @@ Reference company policy database (most relevant excerpts for this question):
     messages.append({"role": "user", "content": user_message})
 
     try:
-        response = await client.chat.completions.create(
-            model=active_model,
-            messages=messages,
+        reply, used_provider = await call_with_fallback(
+            providers,
+            messages,
             temperature=CHAT_TEMPERATURE,
             max_tokens=900,
+            log_prefix="llm_chat",
         )
-        reply = response.choices[0].message.content
-        return reply.strip() if reply else f"{provider_name} returned an empty response."
+        return reply
     except Exception as exc:
-        print(f"[llm_chat] Cloud LLM call failed, falling back to offline mode: {exc!r}")
+        print(f"[llm_chat] All configured providers failed, falling back to offline mode: {exc!r}")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
