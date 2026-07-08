@@ -903,59 +903,63 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
   padding: 60px 20px;
 }
 
-/* Static Law Badge inside Suggestion Card */
-.sug-law-badge {
+/* Hide Suggestion Box globally since edit page has the review wizards */
+.suggestion-box, #suggestion-box, #history-suggestion-box {
+  display: none !important;
+}
+
+/* Accordion Collapsible Details in Issue Sidebar Cards */
+.issue-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text);
+  line-height: 1.45;
+  animation: slideDown 0.25s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.issue-law-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: rgba(79, 142, 247, 0.1);
   border: 1px solid rgba(79, 142, 247, 0.25);
   color: var(--accent);
-  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
   font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 6px;
-  margin-bottom: 4px;
   width: fit-content;
+  font-size: 11px;
 }
-.sug-law-text {
+.issue-law-text {
   background: rgba(245, 166, 35, 0.04);
   border-left: 3px solid var(--amber);
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: 4px;
-  margin-bottom: 8px;
-  color: var(--text);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: 11px;
+  color: var(--text2);
 }
-.sug-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
+.issue-full-desc {
+  color: var(--text2);
 }
-.sug-explanation {
-  background: var(--surface2);
-  border-left: 3px solid var(--border);
-  padding: 8px 12px;
-  border-radius: 4px;
-  margin-bottom: 8px;
-}
-.sug-rewrite-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sug-rewrite-content {
-  background: rgba(46, 204, 143, 0.05);
+.issue-sug-edit {
+  background: rgba(46, 204, 143, 0.04);
   border: 1px dashed rgba(46, 204, 143, 0.2);
-  padding: 10px;
+  padding: 8px;
   border-radius: 4px;
   color: var(--green);
-  font-family: var(--font-mono), monospace;
+}
+.issue-desc-short {
   font-size: 11px;
+  color: var(--text2);
+  line-height: 1.5;
 }
 
 /* Company Policy Source Modal */

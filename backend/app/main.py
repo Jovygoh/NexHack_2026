@@ -493,8 +493,27 @@ class UpdateTextRequest(BaseModel):
 @app.post("/api/history/{id}/text")
 def update_contract_text_endpoint(id: int, request: UpdateTextRequest):
     try:
-        from app.db import update_contract_text
+        from app.db import update_contract_text, get_contract_by_id
         update_contract_text(id, request.contract_text)
+        
+        # Save a copy of the edited contract text to the server filesystem
+        contract = get_contract_by_id(id)
+        if contract:
+            filename = contract.get("file_name", f"contract_{id}")
+            # Ensure name matches extension/type
+            edited_dir = Path("data/edited")
+            edited_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save clean text copy on server filesystem
+            txt_filename = Path(filename).with_suffix(".txt").name
+            text_path = edited_dir / f"{id}_{txt_filename}"
+            text_path.write_text(request.contract_text, encoding="utf-8")
+            
+            # If the original contract was from auto-import folder, keep it synced in processed folder
+            processed_path = Path("data/auto_import/processed") / filename
+            if processed_path.exists():
+                processed_path.write_text(request.contract_text, encoding="utf-8")
+
         return {"status": "ok", "message": "Contract text updated successfully."}
     except Exception as e:
         raise HTTPException(
