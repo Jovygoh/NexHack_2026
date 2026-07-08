@@ -1,6 +1,17 @@
 from __future__ import annotations
 
 from app.models import ClauseFinding, LlmReview
+from app.services.clause_splitter import split_into_sections, to_numbered_lines
+from app.services.retrieval import build_reference_context
+from app.services.llm_client import build_provider_chain, call_with_fallback, ProviderConfig
+
+# Per-call contract-text budget. Long contracts are split into multiple
+# batches instead of being silently truncated after the first ~12,000
+# characters (the original bug: anything past that point was never
+# reviewed, but nothing told the user or the model that).
+REVIEW_BATCH_CHAR_BUDGET = 9000
+
+REVIEW_TEMPERATURE = 0  # deterministic judgement task, not creative writing
 
 
 async def review_with_llm(
@@ -8,7 +19,7 @@ async def review_with_llm(
     api_key: str,
     model: str,
     gemini_api_key: str = "",
-    gemini_model: str = "gemini-1.5-flash",
+    gemini_model: str = "",
     contract_text: str,
     findings: list[ClauseFinding],
     jurisdiction: str | None,
@@ -17,33 +28,106 @@ async def review_with_llm(
     policies_text: str = "",
 ) -> LlmReview | None:
 
-    has_openai = bool(api_key)
-    has_gemini = bool(gemini_api_key)
+    providers = build_provider_chain(
+        openai_api_key=api_key,
+        openai_model=model,
+        gemini_api_key=gemini_api_key,
+        gemini_model=gemini_model,
+    )
 
-    if not has_openai and not has_gemini:
+    if not providers:
+        print("[llm_review] No OPENAI_API_KEY or GEMINI_API_KEY configured — using offline mode.")
         return _offline_fallback_review(findings)
 
     try:
-        from openai import AsyncOpenAI
-    except ImportError:
+        import openai  # noqa: F401  — presence check; ImportError handled below
+    except ImportError as import_exc:
+        print(f"[llm_review] Failed to import OpenAI-compatible client library: {import_exc!r}")
         return _offline_fallback_review(findings)
 
-    if has_openai:
-        client = AsyncOpenAI(api_key=api_key)
-        active_model = model
-    else:
-        client = AsyncOpenAI(
-            api_key=gemini_api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-        )
-        active_model = gemini_model or "gemini-1.5-flash"
-
-    clipped_text = contract_text[:12000]
     finding_summary = "\n".join(
         f"- {finding.severity.upper()} {finding.title}: {finding.excerpt}" for finding in findings
     ) or "- No deterministic rule findings."
 
-    prompt = f"""
+    # Retrieval instead of blind head-truncation: pull the law/policy
+    # passages most relevant to THIS contract, not just whatever happens
+    # to sit in the first N characters of the reference database.
+    laws_context, policies_context = build_reference_context(
+        contract_text, laws_text, policies_text, top_k=5
+    )
+
+    batches = _build_review_batches(contract_text, max_chars=REVIEW_BATCH_CHAR_BUDGET)
+
+    try:
+        if len(batches) <= 1:
+            review_text, used_provider = await _run_single_review(
+                providers,
+                contract_section=batches[0] if batches else "(No readable contract text.)",
+                finding_summary=finding_summary,
+                laws_context=laws_context,
+                policies_context=policies_context,
+                jurisdiction=jurisdiction,
+                language=language,
+            )
+        else:
+            review_text, used_provider = await _run_batched_review(
+                providers,
+                batches,
+                finding_summary=finding_summary,
+                laws_context=laws_context,
+                policies_context=policies_context,
+                jurisdiction=jurisdiction,
+                language=language,
+            )
+        return LlmReview(provider=used_provider.name, model=used_provider.model, review=review_text)
+    except Exception as exc:
+        # If EVERY configured provider fails (bad keys, rate limit, network,
+        # etc.), don't crash the whole scan — fall back to rule-based findings only.
+        print(f"[llm_review] All configured providers failed, falling back to offline mode: {exc!r}")
+        return _offline_fallback_review(findings, exc)
+
+
+def _build_review_batches(contract_text: str, *, max_chars: int) -> list[str]:
+    """
+    Splits the contract into numbered-clause batches, each within
+    max_chars, so a long contract is fully reviewed across multiple
+    calls instead of the tail being silently dropped.
+    """
+    sections = split_into_sections(contract_text)
+    flat_lines = to_numbered_lines(sections)
+
+    if not flat_lines:
+        normalised = " ".join(contract_text.split())
+        if not normalised:
+            return []
+        return [normalised[i:i + max_chars] for i in range(0, len(normalised), max_chars)] or [normalised]
+
+    batches: list[str] = []
+    buffer_lines: list[str] = []
+    buffer_len = 0
+    for line in flat_lines:
+        line_len = len(line) + 1
+        if buffer_lines and buffer_len + line_len > max_chars:
+            batches.append("\n".join(buffer_lines))
+            buffer_lines, buffer_len = [], 0
+        buffer_lines.append(line)
+        buffer_len += line_len
+    if buffer_lines:
+        batches.append("\n".join(buffer_lines))
+    return batches
+
+
+def _review_prompt(
+    contract_section: str,
+    finding_summary: str,
+    laws_context: str,
+    policies_context: str,
+    jurisdiction: str | None,
+    language: str | None,
+    *,
+    part_note: str = "",
+) -> str:
+    return f"""
 You are an enterprise contract compliance screening assistant.
 Your job is to identify hidden clauses, unusual enterprise risk, and review points.
 Do not provide legal advice. Provide practical compliance review guidance.
@@ -51,44 +135,126 @@ Do not provide legal advice. Provide practical compliance review guidance.
 Jurisdiction: {jurisdiction or "not specified"}
 Preferred language: {language or "same as contract/user"}
 
-Reference Malaysian Laws database uploaded by the user:
-{laws_text or "No specific law database documents uploaded. Use your general knowledge of Malaysian company law."}
+Grounding rules (follow strictly):
+- The contract below is numbered as [Clause X.Y]. Every specific issue you raise MUST cite the exact clause id(s) it comes from, e.g. "(Clause 4.2)". If a point is not tied to a specific clause, say so explicitly instead of inventing a clause number.
+- Only use the "Reference Malaysian Laws" and "Reference Company Policy" excerpts below as your law/policy grounding. If something relevant is not covered by them, you may reference well-known Malaysian statute names, but must flag it as "not verified against the uploaded reference database".
+- Do not state a fact about the contract that is not present in the text below.
+{part_note}
 
-Reference Company Policy rules & regulations uploaded by the user:
-{policies_text or "No specific company policy documents uploaded."}
+Reference Malaysian Laws database (most relevant excerpts for this contract):
+{laws_context or "No specific law database documents uploaded, or no relevant match found. Use general knowledge of Malaysian law and flag this clearly."}
 
-Rule findings:
+Reference Company Policy rules & regulations (most relevant excerpts for this contract):
+{policies_context or "No specific company policy documents uploaded, or no relevant match found."}
+
+Deterministic rule-engine findings (already computed — cross-check these against your own read, don't just repeat them):
 {finding_summary}
 
-Contract text:
-{clipped_text}
+Numbered contract text:
+{contract_section}
 
 Return:
 1. Executive summary
-2. Hidden/risky clauses missed or confirmed (especially regarding contradictions with the reference Malaysian laws or Company Policy)
+2. Hidden/risky clauses missed or confirmed — cite clause id for every point (especially contradictions with the reference Malaysian laws or Company Policy)
 3. Questions for legal/compliance team
 4. Recommended negotiation actions
 """.strip()
 
-    try:
-        response = await client.chat.completions.create(
-            model=active_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
+
+async def _run_single_review(
+    providers: list[ProviderConfig],
+    *,
+    contract_section: str,
+    finding_summary: str,
+    laws_context: str,
+    policies_context: str,
+    jurisdiction: str | None,
+    language: str | None,
+) -> tuple[str, ProviderConfig]:
+    prompt = _review_prompt(
+        contract_section, finding_summary, laws_context, policies_context, jurisdiction, language
+    )
+    return await call_with_fallback(
+        providers,
+        [{"role": "user", "content": prompt}],
+        temperature=REVIEW_TEMPERATURE,
+        log_prefix="llm_review",
+    )
+
+
+async def _run_batched_review(
+    providers: list[ProviderConfig],
+    batches: list[str],
+    *,
+    finding_summary: str,
+    laws_context: str,
+    policies_context: str,
+    jurisdiction: str | None,
+    language: str | None,
+) -> tuple[str, ProviderConfig]:
+    """
+    Map-reduce for long contracts: review each batch of clauses
+    independently (so nothing gets silently dropped), then synthesize
+    the partial reviews into one consolidated report. Each call goes
+    through the same OpenAI→Gemini fallback chain, so a mid-review
+    provider outage doesn't abandon the whole scan.
+    """
+    total = len(batches)
+    partial_reviews: list[str] = []
+    last_provider: ProviderConfig | None = None
+
+    for idx, batch in enumerate(batches, start=1):
+        part_note = (
+            f"- This is part {idx} of {total} of a long contract, split by clause. "
+            "Only review the clauses shown in THIS part; do not comment on parts not shown."
         )
-        review_text = response.choices[0].message.content or "No response from LLM."
-        provider = "openai" if has_openai else "gemini"
-        return LlmReview(provider=provider, model=active_model, review=review_text)
-    except Exception as exc:
-        # If the AI call fails (bad key, rate limit, network, etc.),
-        # don't crash the whole scan — fall back to rule-based findings only.
-        return _offline_fallback_review(findings, exc)
+        prompt = _review_prompt(
+            batch, finding_summary, laws_context, policies_context, jurisdiction, language, part_note=part_note
+        )
+        text, used_provider = await call_with_fallback(
+            providers,
+            [{"role": "user", "content": prompt}],
+            temperature=REVIEW_TEMPERATURE,
+            log_prefix="llm_review",
+        )
+        last_provider = used_provider
+        if text.strip():
+            partial_reviews.append(f"--- Part {idx}/{total} ---\n{text.strip()}")
+
+    if not partial_reviews:
+        return "No response from LLM.", (last_provider or providers[0])
+
+    synthesis_prompt = f"""
+You are consolidating {total} partial compliance reviews of ONE long contract (each part covered different, non-overlapping clauses) into a single final review.
+
+Grounding rules:
+- Every specific issue must keep its original clause id citation from the partial reviews below.
+- Do not invent new issues that are not present in the partial reviews.
+- Merge duplicate/overlapping points instead of repeating them.
+
+Partial reviews:
+{chr(10).join(partial_reviews)}
+
+Return ONE consolidated review with these sections:
+1. Executive summary
+2. Hidden/risky clauses missed or confirmed (with clause id citations)
+3. Questions for legal/compliance team
+4. Recommended negotiation actions
+""".strip()
+
+    text, used_provider = await call_with_fallback(
+        providers,
+        [{"role": "user", "content": synthesis_prompt}],
+        temperature=REVIEW_TEMPERATURE,
+        log_prefix="llm_review",
+    )
+    return (text.strip() or "\n\n".join(partial_reviews)), used_provider
 
 
 def _offline_fallback_review(findings: list[ClauseFinding], exc: Exception | None = None) -> LlmReview:
     critical_count = sum(1 for f in findings if f.severity in ["critical", "high"])
     medium_count = sum(1 for f in findings if f.severity == "medium")
-    
+
     error_msg = f" ({exc})" if exc else ""
     fallback_review = f"""
 ### ⚠️ Compliance Review Summary (Offline Fallback Mode)

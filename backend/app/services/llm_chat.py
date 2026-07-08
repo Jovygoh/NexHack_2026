@@ -3,10 +3,14 @@ from __future__ import annotations
 import re
 
 from app.models import ClauseFinding
+from app.services.clause_splitter import format_structured_contract
+from app.services.retrieval import build_reference_context
+from app.services.llm_client import build_provider_chain, call_with_fallback
 
 
-MAX_CONTRACT_CHARS = 14000
-MAX_REFERENCE_CHARS = 9000
+MAX_CONTRACT_CHARS = 16000  # budget for the structured/numbered contract text
+REFERENCE_TOP_K = 5         # number of retrieved law/policy chunks per side
+CHAT_TEMPERATURE = 0.15     # low but not zero — this endpoint still writes conversational replies
 MAX_HISTORY_MESSAGES = 12
 
 
@@ -15,7 +19,7 @@ async def chat_with_llm(
     api_key: str,
     model: str,
     gemini_api_key: str = "",
-    gemini_model: str = "gemini-1.5-flash",
+    gemini_model: str = "",
     message: str,
     contract_text: str,
     findings: list[ClauseFinding],
@@ -27,10 +31,15 @@ async def chat_with_llm(
     if not user_message:
         return "Ask me a question about a contract, Malaysian law, or a clause you want to improve."
 
-    has_openai = bool(api_key)
-    has_gemini = bool(gemini_api_key)
+    providers = build_provider_chain(
+        openai_api_key=api_key,
+        openai_model=model,
+        gemini_api_key=gemini_api_key,
+        gemini_model=gemini_model,
+    )
 
-    if not has_openai and not has_gemini:
+    if not providers:
+        print("[llm_chat] No OPENAI_API_KEY or GEMINI_API_KEY configured — using offline mode.")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
@@ -40,8 +49,9 @@ async def chat_with_llm(
         )
 
     try:
-        from openai import AsyncOpenAI
-    except ImportError:
+        import openai  # noqa: F401  — presence check; ImportError handled below
+    except ImportError as import_exc:
+        print(f"[llm_chat] Failed to import OpenAI-compatible client library: {import_exc!r}")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
@@ -51,21 +61,19 @@ async def chat_with_llm(
             error=RuntimeError("OpenAI-compatible client library is not installed."),
         )
 
-    if has_openai:
-        client = AsyncOpenAI(api_key=api_key)
-        active_model = model
-        provider_name = "OpenAI"
-    else:
-        client = AsyncOpenAI(
-            api_key=gemini_api_key,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-        active_model = gemini_model or "gemini-1.5-flash"
-        provider_name = "Gemini"
+    # Structured, numbered contract text (with explicit truncation marker
+    # if it's still too long) instead of a raw blob silently cut at
+    # MAX_CONTRACT_CHARS with no signal to the model.
+    structured_contract = format_structured_contract(contract_text, max_chars=MAX_CONTRACT_CHARS) if contract_text.strip() else ""
 
-    clipped_contract = contract_text[:MAX_CONTRACT_CHARS].strip()
-    clipped_laws = laws_text[:MAX_REFERENCE_CHARS].strip()
-    clipped_policies = policies_text[:MAX_REFERENCE_CHARS].strip()
+    # Retrieval instead of blind head-truncation of the law/policy
+    # databases: pull the passages most relevant to this question AND
+    # this contract, not just whatever sits in the first N characters.
+    retrieval_query = f"{user_message}\n{contract_text[:4000]}"
+    laws_context, policies_context = build_reference_context(
+        retrieval_query, laws_text, policies_text, top_k=REFERENCE_TOP_K
+    )
+
     finding_summary = "\n".join(
         (
             f"- {finding.severity.upper()} | {finding.title}: {finding.excerpt}\n"
@@ -75,11 +83,11 @@ async def chat_with_llm(
         for finding in findings
     ) or "- No deterministic rule findings."
 
-    if clipped_contract:
+    if structured_contract:
         contract_context = f"""
-Scanned contract text:
+Scanned contract text (numbered as [Clause X.Y] so you can cite exact clauses):
 \"\"\"
-{clipped_contract}
+{structured_contract}
 \"\"\"
 
 Current scan findings:
@@ -104,11 +112,16 @@ Core behavior:
 - If information is missing, say what you can infer and what should be verified.
 - Keep replies concise unless the user asks for detail.
 
-Reference Malaysian laws database:
-{clipped_laws or "No uploaded law reference text is available in this request."}
+Grounding rules (follow strictly):
+- When you reference the contract, cite the exact [Clause X.Y] id. If a point isn't tied to a specific clause, say so instead of inventing a clause number.
+- The law/policy excerpts below are the most relevant passages retrieved for this question, not the full database. If they don't cover the question, say so and rely on general knowledge, flagged as "not verified against the uploaded reference database".
+- Do not state a fact about the contract that isn't present in the text below.
 
-Reference company policy database:
-{clipped_policies or "No uploaded company policy text is available in this request."}
+Reference Malaysian laws database (most relevant excerpts for this question):
+{laws_context or "No uploaded law reference text is available, or no relevant match was found for this question."}
+
+Reference company policy database (most relevant excerpts for this question):
+{policies_context or "No uploaded company policy text is available, or no relevant match was found for this question."}
 
 {contract_context}
 """.strip()
@@ -118,15 +131,16 @@ Reference company policy database:
     messages.append({"role": "user", "content": user_message})
 
     try:
-        response = await client.chat.completions.create(
-            model=active_model,
-            messages=messages,
-            temperature=0.25,
+        reply, used_provider = await call_with_fallback(
+            providers,
+            messages,
+            temperature=CHAT_TEMPERATURE,
             max_tokens=900,
+            log_prefix="llm_chat",
         )
-        reply = response.choices[0].message.content
-        return reply.strip() if reply else f"{provider_name} returned an empty response."
+        return reply
     except Exception as exc:
+        print(f"[llm_chat] All configured providers failed, falling back to offline mode: {exc!r}")
         return offline_fallback_chat(
             message=user_message,
             contract_text=contract_text,
