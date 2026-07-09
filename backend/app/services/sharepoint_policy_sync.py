@@ -4,8 +4,10 @@ import asyncio
 import hashlib
 import json
 import re
+import base64
 import urllib.parse
 import urllib.request
+import urllib.error
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -252,6 +254,14 @@ def _fetch_sharepoint_resource(source_url: str) -> FetchedResource:
                 etag=headers.get("etag", ""),
                 last_modified=headers.get("last-modified", ""),
             )
+        except urllib.error.HTTPError as exc:
+            if exc.code in {401, 403}:
+                last_error = ValueError(
+                    "Microsoft rejected the policy link. Re-share the file so anyone with "
+                    "the link can view it, then paste that sharing link again."
+                )
+            else:
+                last_error = exc
         except Exception as exc:
             last_error = exc
     raise ValueError(last_error or "Could not download the linked policy file.")
@@ -262,37 +272,51 @@ def _candidate_download_urls(source_url: str) -> list[str]:
     query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
     query["download"] = "1"
     with_download = parsed._replace(query=urllib.parse.urlencode(query)).geturl()
-    candidates = [with_download, *_onedrive_download_candidates(parsed), source_url]
+    candidates = [
+        with_download,
+        *_onedrive_download_candidates(source_url, parsed),
+        source_url,
+    ]
     seen: set[str] = set()
     return [url for url in candidates if not (url in seen or seen.add(url))]
 
 
-def _onedrive_download_candidates(parsed: urllib.parse.ParseResult) -> list[str]:
+def _onedrive_download_candidates(source_url: str, parsed: urllib.parse.ParseResult) -> list[str]:
     """
     OneDrive sharing URLs are often view/edit pages, not file bytes. Public
     personal OneDrive links expose the actual content through /download with
-    the same resid/authkey query values. Short 1drv.ms links are still tried
-    with ?download=1 and then followed by urllib redirects in the fetcher.
+    the same resid/authkey query values. Microsoft also exposes anonymous
+    sharing links through the public shares API using a base64url share id.
     """
     host = parsed.netloc.lower()
-    if "onedrive.live.com" not in host:
+    if not any(marker in host for marker in ("onedrive.live.com", "1drv.ms", "sharepoint.com")):
         return []
+
+    candidates = [_onedrive_shares_api_url(source_url)]
+    if "onedrive.live.com" not in host:
+        return candidates
 
     query = dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True))
     resid = query.get("resid") or query.get("id")
     authkey = query.get("authkey")
     if not resid:
-        return []
+        return candidates
 
     download_query = {"resid": resid}
     if authkey:
         download_query["authkey"] = authkey
 
     encoded = urllib.parse.urlencode(download_query)
-    return [
+    candidates.extend([
         urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/download", "", encoded, "")),
         urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/download.aspx", "", encoded, "")),
-    ]
+    ])
+    return candidates
+
+
+def _onedrive_shares_api_url(source_url: str) -> str:
+    encoded = base64.urlsafe_b64encode(source_url.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"https://api.onedrive.com/v1.0/shares/u!{encoded}/root/content"
 
 
 def _extension_from_resource(resource: FetchedResource) -> str:

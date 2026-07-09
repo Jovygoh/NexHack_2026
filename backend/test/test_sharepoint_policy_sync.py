@@ -2,6 +2,7 @@ from app.services.sharepoint_policy_sync import (
     ACTIVE_POLICY_FILENAME,
     FetchedResource,
     _candidate_download_urls,
+    _onedrive_shares_api_url,
     link_company_policy_source,
     read_company_policy_source_status,
     sync_company_policy_source,
@@ -101,6 +102,7 @@ def test_onedrive_live_link_generates_download_candidates():
 
     assert candidates[0].startswith("https://onedrive.live.com/edit.aspx?")
     assert "download=1" in candidates[0]
+    assert _onedrive_shares_api_url(url) in candidates
     assert "https://onedrive.live.com/download?resid=ABC123%21123&authkey=%21secret" in candidates
     assert "https://onedrive.live.com/download.aspx?resid=ABC123%21123&authkey=%21secret" in candidates
 
@@ -111,4 +113,15 @@ def test_short_onedrive_link_keeps_download_candidate():
     candidates = _candidate_download_urls(url)
 
     assert candidates[0] == "https://1drv.ms/w/s!abcde12345?download=1"
+    assert _onedrive_shares_api_url(url) in candidates
+    assert url in candidates
+
+
+def test_sharepoint_link_gets_public_share_api_fallback():
+    url = "https://contoso.sharepoint.com/:w:/s/legal/Eabcdef?e=abc123"
+
+    candidates = _candidate_download_urls(url)
+
+    assert candidates[0].endswith("download=1")
+    assert _onedrive_shares_api_url(url) in candidates
     assert url in candidates
