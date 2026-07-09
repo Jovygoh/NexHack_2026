@@ -58,6 +58,9 @@ function goPage(name) {
   if (name === 'scanner') {
     restoreScannerView();
   }
+  if (name === 'settings') {
+    loadCompanyPolicyFiles();
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -625,6 +628,175 @@ async function uploadCompanyPolicyFile() {
     status.className = 'policy-modal-status error';
   } finally {
     btn.disabled = false;
+  }
+}
+
+let _editingPolicyId = null;
+
+async function loadCompanyPolicyFiles() {
+  const listEl = document.getElementById('settings-policy-file-list');
+  const statusEl = document.getElementById('settings-policy-status');
+  if (!listEl) return;
+
+  listEl.innerHTML = '<div class="policy-help">Loading company policy files...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/api/reference/policy/files`);
+    const files = await res.json().catch(() => []);
+    if (!res.ok) throw new Error(files.detail || `Server returned ${res.status}`);
+
+    if (!files.length) {
+      listEl.innerHTML = '<div class="policy-help">No company policy files stored yet.</div>';
+      closeCompanyPolicyEditor();
+    } else {
+      listEl.innerHTML = files.map(file => `
+        <div class="policy-file-item">
+          <div>
+            <div class="policy-file-name">${escapeHtml(file.name || 'Company policy')}</div>
+            <div class="policy-file-meta">v${file.version || 1} - ${(file.size_chars || 0).toLocaleString()} chars</div>
+          </div>
+          <button class="filter-btn btn-sm" onclick="openCompanyPolicyEditor(${Number(file.id)})">Edit</button>
+          <button class="filter-btn btn-sm btn-disconnect" onclick="removeCompanyPolicyFile(${Number(file.id)})">Remove</button>
+        </div>
+      `).join('');
+    }
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'policy-modal-status';
+    }
+    loadPolicySourceStatus();
+  } catch (err) {
+    listEl.innerHTML = '';
+    if (statusEl) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'policy-modal-status error';
+    }
+  }
+}
+
+async function uploadCompanyPolicyFromSettings() {
+  const input = document.getElementById('settings-policy-upload-file');
+  const statusEl = document.getElementById('settings-policy-status');
+  const file = input?.files?.[0];
+  if (!file) {
+    if (statusEl) {
+      statusEl.textContent = 'Choose a company policy file first.';
+      statusEl.className = 'policy-modal-status error';
+    }
+    return;
+  }
+
+  if (statusEl) {
+    statusEl.textContent = 'Uploading company policy file...';
+    statusEl.className = 'policy-modal-status';
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/reference/policy/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    if (input) input.value = '';
+    if (statusEl) {
+      statusEl.textContent = data.message || 'Company policy file uploaded.';
+      statusEl.className = 'policy-modal-status ok';
+    }
+    updatePolicySourceUi(data);
+    await loadCompanyPolicyFiles();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'policy-modal-status error';
+    }
+  }
+}
+
+async function openCompanyPolicyEditor(policyId) {
+  const panel = document.getElementById('settings-policy-editor');
+  const titleEl = document.getElementById('settings-policy-editor-title');
+  const textEl = document.getElementById('settings-policy-editor-text');
+  const statusEl = document.getElementById('settings-policy-status');
+  if (!panel || !textEl) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/reference/policy/files/${policyId}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    _editingPolicyId = policyId;
+    if (titleEl) titleEl.textContent = data.name || 'Company policy file';
+    textEl.value = data.content_text || '';
+    panel.style.display = 'block';
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'policy-modal-status';
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'policy-modal-status error';
+    }
+  }
+}
+
+function closeCompanyPolicyEditor() {
+  _editingPolicyId = null;
+  const panel = document.getElementById('settings-policy-editor');
+  const textEl = document.getElementById('settings-policy-editor-text');
+  if (panel) panel.style.display = 'none';
+  if (textEl) textEl.value = '';
+}
+
+async function saveCompanyPolicyEdit() {
+  const textEl = document.getElementById('settings-policy-editor-text');
+  const statusEl = document.getElementById('settings-policy-status');
+  if (!_editingPolicyId || !textEl) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/reference/policy/files/${_editingPolicyId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_text: textEl.value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    if (statusEl) {
+      statusEl.textContent = data.message || 'Company policy file updated.';
+      statusEl.className = 'policy-modal-status ok';
+    }
+    await loadCompanyPolicyFiles();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'policy-modal-status error';
+    }
+  }
+}
+
+async function removeCompanyPolicyFile(policyId) {
+  if (!confirm('Remove this company policy file from future scans?')) return;
+  const statusEl = document.getElementById('settings-policy-status');
+  try {
+    const res = await fetch(`${API_BASE}/api/reference/policy/files/${policyId}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    if (_editingPolicyId === policyId) closeCompanyPolicyEditor();
+    if (statusEl) {
+      statusEl.textContent = data.message || 'Company policy file removed.';
+      statusEl.className = 'policy-modal-status ok';
+    }
+    await loadCompanyPolicyFiles();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'policy-modal-status error';
+    }
   }
 }
 

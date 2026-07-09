@@ -341,6 +341,36 @@
           🎉 No compliance issues left to review.
         </div>
       </div>
+
+      <div class="email-config-container policy-manager-container" id="policy-manager-container">
+        <div class="email-config-header">
+          <div class="email-config-title">
+            <span class="email-icon">📄</span>
+            <h4>Company Policy Files</h4>
+          </div>
+          <button class="filter-btn btn-sm" onclick="loadCompanyPolicyFiles()">Refresh</button>
+        </div>
+
+        <div class="policy-manager-upload">
+          <input class="policy-input" id="settings-policy-upload-file" type="file" accept=".pdf,.docx,.txt,.md">
+          <button class="filter-btn btn-sm btn-connect" onclick="uploadCompanyPolicyFromSettings()">Upload new file</button>
+        </div>
+        <div class="policy-help">Stored policy files are used when Company policy is selected during contract scanning.</div>
+        <div id="settings-policy-status" class="policy-modal-status"></div>
+
+        <div class="policy-file-list" id="settings-policy-file-list"></div>
+
+        <div class="policy-editor-panel" id="settings-policy-editor" style="display:none">
+          <div class="policy-editor-header">
+            <strong id="settings-policy-editor-title">Policy file</strong>
+            <button class="filter-btn btn-sm" onclick="closeCompanyPolicyEditor()">Close</button>
+          </div>
+          <textarea class="policy-editor-textarea" id="settings-policy-editor-text"></textarea>
+          <div class="policy-modal-actions">
+            <button class="btn-primary" onclick="saveCompanyPolicyEdit()">Save changes</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -350,7 +380,7 @@
 <div id="page-settings" class="page">
   <div class="history-wrap">
     <div class="page-title">Settings</div>
-    <div class="page-sub">Configure inbound email connection credentials and server parameters.</div>
+    <div class="page-sub">Configure inbound email credentials and manage stored company policy files.</div>
     
     <div class="automation-dashboard">
       <!-- Inbound Email Configuration -->
