@@ -411,8 +411,6 @@ def save_company_policy_snapshot(record: dict) -> int:
     cursor = conn.cursor()
     p = get_placeholder()
 
-    cursor.execute("UPDATE company_policies SET is_active = 0")
-
     params = (
         record.get("source_url", ""),
         record.get("download_url", ""),
@@ -447,20 +445,68 @@ def save_company_policy_snapshot(record: dict) -> int:
 
 
 def get_active_company_policy() -> dict | None:
+    policies = list_company_policies(active_only=True)
+    return policies[0] if policies else None
+
+
+def list_company_policies(active_only: bool = True) -> list[dict]:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    where_clause = "WHERE is_active = 1" if active_only else ""
+    cursor.execute(f"""
         SELECT id, source_url, download_url, version, content_text, checksum, etag,
-               last_modified, synced_at
+               last_modified, is_active, synced_at
         FROM company_policies
-        WHERE is_active = 1
+        {where_clause}
         ORDER BY id DESC
-        LIMIT 1
     """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [_company_policy_row_to_dict(row) for row in rows]
+
+
+def get_company_policy_by_id(policy_id: int) -> dict | None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    p = get_placeholder()
+    cursor.execute(f"""
+        SELECT id, source_url, download_url, version, content_text, checksum, etag,
+               last_modified, is_active, synced_at
+        FROM company_policies
+        WHERE id = {p}
+    """, (policy_id,))
     row = cursor.fetchone()
     conn.close()
-    if not row:
-        return None
+    return _company_policy_row_to_dict(row) if row else None
+
+
+def update_company_policy_text(policy_id: int, content_text: str) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    p = get_placeholder()
+    checksum = ""
+    cursor.execute(
+        f"UPDATE company_policies SET content_text = {p}, checksum = {p} WHERE id = {p} AND is_active = 1",
+        (content_text, checksum, policy_id),
+    )
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def delete_company_policy(policy_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    p = get_placeholder()
+    cursor.execute(f"UPDATE company_policies SET is_active = 0 WHERE id = {p}", (policy_id,))
+    changed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return changed
+
+
+def _company_policy_row_to_dict(row) -> dict:
     return {
         "id": row["id"],
         "source_url": row["source_url"],
@@ -470,6 +516,7 @@ def get_active_company_policy() -> dict | None:
         "checksum": row["checksum"],
         "etag": row["etag"],
         "last_modified": row["last_modified"],
+        "is_active": bool(row["is_active"]),
         "synced_at": str(row["synced_at"]),
     }
 

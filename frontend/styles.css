@@ -1012,6 +1012,17 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
 .export-choice.active{background:rgba(79,142,247,0.16);border-color:var(--accent);color:var(--accent)}
 .export-choice:hover{border-color:var(--border2);color:var(--text)}
 
+.policy-manager-container{margin-top:20px;padding:18px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.policy-manager-upload{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:14px}
+.policy-file-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.policy-file-item{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2)}
+.policy-file-name{font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.policy-file-meta{font-size:11px;color:var(--text3);margin-top:3px}
+.policy-editor-panel{margin-top:14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);padding:12px}
+.policy-editor-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+.policy-editor-textarea{width:100%;min-height:260px;resize:vertical;background:#0b0f18;border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:Consolas,'Courier New',monospace;font-size:12px;line-height:1.5;padding:12px;outline:none}
+.policy-editor-textarea:focus{border-color:var(--accent)}
+
 /* --- BATCH SELECT --- */
 .batch-select {
   margin-right: 15px;

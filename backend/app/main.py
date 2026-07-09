@@ -17,7 +17,12 @@ from app.services.risk_rules import SELECTABLE_LAW_IDS, analyze_text, calculate_
 from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
 from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
-from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts, get_email_config, save_email_config, disconnect_email, get_active_company_policy, save_company_policy_snapshot
+from app.db import (
+    init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract,
+    clear_all_contracts, get_email_config, save_email_config, disconnect_email,
+    get_active_company_policy, save_company_policy_snapshot, list_company_policies,
+    get_company_policy_by_id, update_company_policy_text, delete_company_policy,
+)
 from app.services.automation import start_automation_watcher, process_incoming_contracts, AUTO_IMPORT_DIR, AUTO_IMPORT_PROCESSED_DIR
 from app.services.malaysia_law_updater import (
     read_malaysia_law_update_status,
@@ -59,7 +64,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -94,9 +99,13 @@ def _load_reference_text(folder: Path) -> str:
 
 
 def _load_company_policy_text() -> str:
-    active_policy = get_active_company_policy()
-    if active_policy and active_policy.get("content_text", "").strip():
-        return active_policy["content_text"]
+    active_policies = list_company_policies(active_only=True)
+    if active_policies:
+        return "\n\n".join(
+            f"--- Company policy file: {policy['source_url']} ---\n{policy['content_text']}"
+            for policy in active_policies
+            if policy.get("content_text", "").strip()
+        )
     return _load_reference_text(POLICIES_DIR)
 
 
@@ -111,6 +120,9 @@ class ChatRequest(BaseModel):
 
 class CompanyPolicyLinkRequest(BaseModel):
     source_url: str
+
+class CompanyPolicyUpdateRequest(BaseModel):
+    content_text: str
 
 class ContractTextAnalyzeRequest(BaseModel):
     file_name: str = "edited-contract.txt"
@@ -400,15 +412,17 @@ async def refresh_malaysia_law_reference():
 @app.get("/api/reference/policy/source")
 def get_company_policy_source():
     status = read_company_policy_source_status(POLICIES_DIR)
-    active_policy = get_active_company_policy()
-    if active_policy:
+    active_policies = list_company_policies(active_only=True)
+    if active_policies:
+        latest_policy = active_policies[0]
         status.update({
             "sync_status": "up_to_date",
-            "message": status.get("message") if status.get("sync_status") == "up_to_date" else "Company policy is stored in the database.",
-            "version": active_policy["version"],
-            "policy_db_id": active_policy["id"],
-            "db_version": active_policy["version"],
-            "db_synced_at": active_policy["synced_at"],
+            "message": f"{len(active_policies)} company policy file(s) stored in the database.",
+            "version": latest_policy["version"],
+            "policy_db_id": latest_policy["id"],
+            "db_version": latest_policy["version"],
+            "db_synced_at": latest_policy["synced_at"],
+            "policy_count": len(active_policies),
             "stored_in_database": True,
         })
     else:
@@ -435,6 +449,62 @@ async def save_company_policy_source(request: CompanyPolicyLinkRequest):
 async def sync_company_policy_now():
     return await asyncio.to_thread(sync_company_policy_source, POLICIES_DIR)
 
+@app.get("/api/reference/policy/files")
+def list_company_policy_files():
+    policies = list_company_policies(active_only=True)
+    return [
+        {
+            "id": policy["id"],
+            "name": _policy_display_name(policy["source_url"]),
+            "source_url": policy["source_url"],
+            "version": policy["version"],
+            "synced_at": policy["synced_at"],
+            "size_chars": len(policy.get("content_text") or ""),
+        }
+        for policy in policies
+    ]
+
+@app.get("/api/reference/policy/files/{policy_id}")
+def get_company_policy_file(policy_id: int):
+    policy = get_company_policy_by_id(policy_id)
+    if not policy or not policy.get("is_active"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company policy file not found.",
+        )
+    return {
+        "id": policy["id"],
+        "name": _policy_display_name(policy["source_url"]),
+        "source_url": policy["source_url"],
+        "version": policy["version"],
+        "content_text": policy["content_text"],
+        "synced_at": policy["synced_at"],
+    }
+
+@app.put("/api/reference/policy/files/{policy_id}")
+def update_company_policy_file(policy_id: int, request: CompanyPolicyUpdateRequest):
+    content_text = request.content_text.strip()
+    if not content_text:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Company policy text cannot be empty.",
+        )
+    if not update_company_policy_text(policy_id, content_text):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company policy file not found.",
+        )
+    return {"status": "ok", "message": "Company policy file updated.", "id": policy_id}
+
+@app.delete("/api/reference/policy/files/{policy_id}")
+def remove_company_policy_file(policy_id: int):
+    if not delete_company_policy(policy_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company policy file not found.",
+        )
+    return {"status": "ok", "message": "Company policy file removed.", "id": policy_id}
+
 @app.post("/api/reference/policy/upload")
 async def upload_company_policy_file(file: UploadFile = File(...)):
     try:
@@ -451,8 +521,9 @@ async def upload_company_policy_file(file: UploadFile = File(...)):
         uploaded_path = POLICIES_DIR / filename
         uploaded_path.write_bytes(content)
 
-        active_policy = get_active_company_policy()
-        next_version = int(active_policy["version"]) + 1 if active_policy else 1
+        active_policies = list_company_policies(active_only=True)
+        latest_version = max((int(policy["version"]) for policy in active_policies), default=0)
+        next_version = latest_version + 1
         checksum = hashlib.sha256(content).hexdigest()
         policy_text = "\n".join([
             f"# Company Policy Reference v{next_version}",
@@ -500,6 +571,11 @@ async def upload_company_policy_file(file: UploadFile = File(...)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Company policy upload failed: {str(e)}"
         )
+
+def _policy_display_name(source_url: str) -> str:
+    if source_url.startswith("upload://"):
+        return source_url.replace("upload://", "", 1)
+    return Path(source_url).name or source_url
 
 @app.post("/api/reference/upload")
 async def upload_reference_file(
