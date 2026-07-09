@@ -568,7 +568,6 @@ function renderCompanyPolicySelection() {
 
 function openPolicyLinkModal() {
   const modal = document.getElementById('policy-link-modal');
-  const input = document.getElementById('policy-sharepoint-url');
   const fileInput = document.getElementById('policy-upload-file');
   const status = document.getElementById('policy-modal-status');
   if (!modal) return;
@@ -578,7 +577,7 @@ function openPolicyLinkModal() {
     status.textContent = '';
     status.className = 'policy-modal-status';
   }
-  setTimeout(() => input?.focus(), 50);
+  setTimeout(() => fileInput?.focus(), 50);
 }
 
 function closePolicyLinkModal() {
@@ -586,40 +585,7 @@ function closePolicyLinkModal() {
 }
 
 async function linkCompanyPolicySource() {
-  const input = document.getElementById('policy-sharepoint-url');
-  const status = document.getElementById('policy-modal-status');
-  const btn = document.getElementById('policy-link-submit');
-  const sourceUrl = (input?.value || '').trim();
-  if (!sourceUrl) {
-    status.textContent = 'Paste a SharePoint policy file link first.';
-    status.className = 'policy-modal-status error';
-    return;
-  }
-
-  btn.disabled = true;
-  status.textContent = 'Linking and syncing company policy...';
-  status.className = 'policy-modal-status';
-
-  try {
-    const res = await fetch(`${API_BASE}/api/reference/policy/source`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_url: sourceUrl }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
-
-    updatePolicySourceUi(data);
-    status.className = data.sync_status === 'error' ? 'policy-modal-status error' : 'policy-modal-status ok';
-    if (data.sync_status !== 'error') {
-      setTimeout(closePolicyLinkModal, 700);
-    }
-  } catch (err) {
-    status.textContent = err.message;
-    status.className = 'policy-modal-status error';
-  } finally {
-    btn.disabled = false;
-  }
+  return uploadCompanyPolicyFile();
 }
 
 // ═══════════════════════════════════════════

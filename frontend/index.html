@@ -434,22 +434,17 @@
     <div class="policy-modal-header">
       <div>
         <h3>Company Policy</h3>
-        <p>Upload your company policy once, or link a Microsoft 365 file if it is publicly downloadable.</p>
+        <p>Upload your company policy file once. ContractSense stores it in the policy database for future scans.</p>
       </div>
       <button class="modal-close" onclick="closePolicyLinkModal()">×</button>
     </div>
     <label class="policy-label" for="policy-upload-file">Upload policy file</label>
     <input class="policy-input" id="policy-upload-file" type="file" accept=".pdf,.docx,.txt,.md">
-    <div class="policy-help">Recommended: upload PDF, DOCX, TXT, or MD. The extracted policy text is stored in the policy database for future scans.</div>
-    <div style="height:1px;background:var(--border2);margin:16px 0;"></div>
-    <label class="policy-label" for="policy-sharepoint-url">SharePoint or OneDrive policy file link</label>
-    <input class="policy-input" id="policy-sharepoint-url" placeholder="https://company.sharepoint.com/.../HR Policy.docx or https://1drv.ms/...">
-    <div class="policy-help">Only works when Microsoft allows anonymous download. For private OneDrive files, use upload instead.</div>
+    <div class="policy-help">Supported formats: PDF, DOCX, TXT, or MD.</div>
     <div class="policy-modal-status" id="policy-modal-status"></div>
     <div class="policy-modal-actions">
       <button class="btn-ghost" onclick="closePolicyLinkModal()">Cancel</button>
-      <button class="btn-ghost" id="policy-upload-submit" onclick="uploadCompanyPolicyFile()">Upload & store</button>
-      <button class="btn-primary" id="policy-link-submit" onclick="linkCompanyPolicySource()">Link & sync</button>
+      <button class="btn-primary" id="policy-upload-submit" onclick="uploadCompanyPolicyFile()">Upload & store</button>
     </div>
   </div>
 </div>
