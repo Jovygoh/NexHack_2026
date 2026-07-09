@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ from app.services.risk_rules import SELECTABLE_LAW_IDS, analyze_text, calculate_
 from app.services.text_extraction import read_and_validate_upload, extract_text_from_bytes
 from app.services.pdf_highlight import extract_pdf_with_coords, match_excerpt_to_boxes
 
-from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts, get_email_config, save_email_config, disconnect_email, get_active_company_policy
+from app.db import init_db, save_contract, get_all_contracts, get_contract_by_id, delete_contract, clear_all_contracts, get_email_config, save_email_config, disconnect_email, get_active_company_policy, save_company_policy_snapshot
 from app.services.automation import start_automation_watcher, process_incoming_contracts, AUTO_IMPORT_DIR, AUTO_IMPORT_PROCESSED_DIR
 from app.services.malaysia_law_updater import (
     read_malaysia_law_update_status,
@@ -24,6 +25,8 @@ from app.services.malaysia_law_updater import (
     update_malaysia_law_database,
 )
 from app.services.sharepoint_policy_sync import (
+    ACTIVE_POLICY_FILENAME,
+    SOURCE_FILENAME,
     link_company_policy_source,
     read_company_policy_source_status,
     start_company_policy_sync,
@@ -400,6 +403,9 @@ def get_company_policy_source():
     active_policy = get_active_company_policy()
     if active_policy:
         status.update({
+            "sync_status": "up_to_date",
+            "message": status.get("message") if status.get("sync_status") == "up_to_date" else "Company policy is stored in the database.",
+            "version": active_policy["version"],
             "policy_db_id": active_policy["id"],
             "db_version": active_policy["version"],
             "db_synced_at": active_policy["synced_at"],
@@ -428,6 +434,72 @@ async def save_company_policy_source(request: CompanyPolicyLinkRequest):
 @app.post("/api/reference/policy/sync")
 async def sync_company_policy_now():
     return await asyncio.to_thread(sync_company_policy_source, POLICIES_DIR)
+
+@app.post("/api/reference/policy/upload")
+async def upload_company_policy_file(file: UploadFile = File(...)):
+    try:
+        content, extension = await read_and_validate_upload(file, settings.max_upload_mb)
+        text = extract_text_from_bytes(content, extension)
+        if not text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Could not extract readable text from the uploaded company policy.",
+            )
+
+        filename = Path(file.filename or "company-policy").name
+        POLICIES_DIR.mkdir(parents=True, exist_ok=True)
+        uploaded_path = POLICIES_DIR / filename
+        uploaded_path.write_bytes(content)
+
+        active_policy = get_active_company_policy()
+        next_version = int(active_policy["version"]) + 1 if active_policy else 1
+        checksum = hashlib.sha256(content).hexdigest()
+        policy_text = "\n".join([
+            f"# Company Policy Reference v{next_version}",
+            "",
+            f"Source: Uploaded file - {filename}",
+            "",
+            "## Extracted Policy Text",
+            "",
+            text.strip(),
+            "",
+        ])
+        (POLICIES_DIR / ACTIVE_POLICY_FILENAME).write_text(policy_text, encoding="utf-8")
+        version_file = POLICIES_DIR / f"company_policy_v{next_version}.md"
+        version_file.write_text(policy_text, encoding="utf-8")
+
+        policy_db_id = save_company_policy_snapshot({
+            "source_url": f"upload://{filename}",
+            "download_url": str(uploaded_path),
+            "version": next_version,
+            "content_text": policy_text,
+            "checksum": checksum,
+            "etag": "",
+            "last_modified": "",
+        })
+
+        manifest = {
+            "source_type": "uploaded_file",
+            "source_url": f"upload://{filename}",
+            "download_url": str(uploaded_path),
+            "sync_status": "up_to_date",
+            "message": f"Company policy uploaded and stored as version {next_version}.",
+            "version": next_version,
+            "checksum": checksum,
+            "active_policy_file": ACTIVE_POLICY_FILENAME,
+            "latest_version_file": version_file.name,
+            "policy_db_id": policy_db_id,
+            "stored_in_database": True,
+        }
+        (POLICIES_DIR / SOURCE_FILENAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return manifest
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Company policy upload failed: {str(e)}"
+        )
 
 @app.post("/api/reference/upload")
 async def upload_reference_file(
