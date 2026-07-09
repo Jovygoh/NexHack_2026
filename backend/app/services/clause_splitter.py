@@ -54,6 +54,7 @@ def split_into_sections(text: str) -> list[Section]:
     if no decimal matches exist, and finally falls back to a single
     section with the whole text as one clause if no structure is found.
     """
+    original_text = text
     text = " ".join(text.split())  # normalise whitespace/newlines
 
     header_matches = list(_SECTION_HEADER_PATTERN.finditer(text))
@@ -68,7 +69,8 @@ def split_into_sections(text: str) -> list[Section]:
         if flat_matches and _looks_like_real_flat_structure(text, flat_matches):
             clause_matches = flat_matches
         else:
-            return [Section(title="", clauses=[Clause(id="1", text=text)])]
+            sentence_clauses = _split_unstructured_text_into_sentence_clauses(original_text)
+            return [Section(title="", clauses=sentence_clauses or [Clause(id="1", text=text)])]
 
     # Build a lookup of section number -> title from header matches
     titles: dict[str, str] = {}
@@ -108,6 +110,33 @@ def split_into_sections(text: str) -> list[Section]:
         )
         for num in section_order
     ]
+
+
+def _split_unstructured_text_into_sentence_clauses(text: str) -> list[Clause]:
+    """
+    Fallback for uploads where PDF/DOC extraction loses clause numbering.
+    Instead of treating the whole contract as one blob, preserve a practical
+    line-by-line/sentence-by-sentence review surface so every sentence can be
+    checked and highlighted independently.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    units: list[str] = []
+
+    source_units = lines if len(lines) > 1 else [text]
+    for unit in source_units:
+        unit = " ".join(unit.split())
+        if not unit:
+            continue
+        parts = re.split(r"(?<=[.!?;])\s+(?=[A-Z0-9'\"])", unit)
+        for part in parts:
+            clean = part.strip()
+            if len(clean) >= 8:
+                units.append(clean)
+
+    if len(units) <= 1:
+        return []
+
+    return [Clause(id=str(idx), text=unit) for idx, unit in enumerate(units, start=1)]
 
 
 def _looks_like_real_clause_structure(text: str, clause_matches: list, header_matches: list) -> bool:

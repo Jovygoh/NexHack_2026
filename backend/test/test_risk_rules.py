@@ -72,6 +72,26 @@ def test_detects_specific_employment_and_pdpa_errors() -> None:
     assert any(fid.startswith("pdpa-rights-waiver") for fid in ids)
 
 
+def test_detects_problem_contract_employment_and_pdpa_clauses() -> None:
+    text = """
+    4. LEAVE
+    4.1 Unused leave shall be forfeited at the end of each calendar year and shall not be carried forward or encashed.
+    5. TERMINATION
+    5.1 Either party may terminate this Agreement by providing 24 hours written notice to the other party.
+    5.2 The Employer may terminate the Employee's services immediately and without notice or compensation for any reason deemed sufficient by the Employer.
+    6. PERSONAL DATA
+    6.1 The Employee consents to the Employer collecting, processing, and disclosing their personal data to any third party for any purpose the Employer deems necessary.
+    """
+
+    findings = analyze_text(text)
+
+    ids = {finding.id for finding in findings}
+    assert any(fid.startswith("annual-leave-forfeiture") for fid in ids)
+    assert any(fid.startswith("unlawful-short-termination-notice") for fid in ids)
+    assert any(fid.startswith("summary-dismissal-without-due-inquiry") for fid in ids)
+    assert any(fid.startswith("data-use") for fid in ids)
+
+
 def test_detects_decimal_clauses_without_section_headers() -> None:
     text = """
     This Employment Agreement is made between the parties.
@@ -169,3 +189,39 @@ def test_splits_three_level_clause_numbers() -> None:
     clauses = [clause for section in split_into_sections(text) for clause in section.clauses]
 
     assert [clause.id for clause in clauses] == ["1.1.1", "1.1.2"]
+
+
+def test_unstructured_contract_is_checked_sentence_by_sentence() -> None:
+    from app.services.clause_splitter import split_into_sections
+    text = (
+        "The Employee shall work 60 hours per week as normal working hours. "
+        "The Employee waives all rights under the Personal Data Protection Act 2010. "
+        "The agreement will automatically renew unless the customer gives written notice."
+    )
+
+    clauses = [clause for section in split_into_sections(text) for clause in section.clauses]
+    findings = analyze_text(text)
+    ids = {finding.id for finding in findings}
+
+    assert len(clauses) == 3
+    assert any(fid.startswith("excessive-working-hours-1") for fid in ids)
+    assert any(fid.startswith("pdpa-rights-waiver-2") for fid in ids)
+    assert any(fid.startswith("auto-renewal-3") for fid in ids)
+
+
+def test_detects_company_policy_conflict_per_clause() -> None:
+    policy = """
+    Personal data must only be disclosed to approved processors with prior written consent.
+    Employees shall receive no less than the statutory minimum annual leave and unused leave must be handled according to HR approval.
+    """
+    text = """
+    1. POLICY CONFLICTS
+    1.1 The Employer may disclose personal data to any third party for any purpose it deems necessary.
+    1.2 Unused leave shall be forfeited at the end of each calendar year.
+    """
+
+    findings = analyze_text(text, policies_text=policy)
+    ids = {finding.id for finding in findings}
+
+    assert any(fid.startswith("company-policy-conflict-1.1") for fid in ids)
+    assert any(fid.startswith("company-policy-conflict-1.2") for fid in ids)
