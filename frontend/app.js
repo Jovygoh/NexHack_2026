@@ -569,9 +569,11 @@ function renderCompanyPolicySelection() {
 function openPolicyLinkModal() {
   const modal = document.getElementById('policy-link-modal');
   const input = document.getElementById('policy-sharepoint-url');
+  const fileInput = document.getElementById('policy-upload-file');
   const status = document.getElementById('policy-modal-status');
   if (!modal) return;
   modal.classList.add('show');
+  if (fileInput) fileInput.value = '';
   if (status) {
     status.textContent = '';
     status.className = 'policy-modal-status';
@@ -623,6 +625,43 @@ async function linkCompanyPolicySource() {
 // ═══════════════════════════════════════════
 // SCANNER — CALL REAL BACKEND API
 // ═══════════════════════════════════════════
+async function uploadCompanyPolicyFile() {
+  const input = document.getElementById('policy-upload-file');
+  const status = document.getElementById('policy-modal-status');
+  const btn = document.getElementById('policy-upload-submit');
+  const file = input?.files?.[0];
+  if (!file) {
+    status.textContent = 'Choose a company policy file first.';
+    status.className = 'policy-modal-status error';
+    return;
+  }
+
+  btn.disabled = true;
+  status.textContent = 'Uploading and storing company policy...';
+  status.className = 'policy-modal-status';
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/reference/policy/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server returned ${res.status}`);
+
+    updatePolicySourceUi(data);
+    status.textContent = data.message || 'Company policy uploaded and stored.';
+    status.className = 'policy-modal-status ok';
+    setTimeout(closePolicyLinkModal, 700);
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'policy-modal-status error';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function startScan() {
   if (!_selectedFile) return;
 
