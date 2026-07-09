@@ -94,6 +94,7 @@
     <div class="contract-panel">
       <div class="contract-panel-bar">
         <h3 id="results-filename">–</h3>
+        <select id="batch-contract-select" class="batch-select" style="display:none;" onchange="onBatchContractSelect(this.value)"></select>
         <div class="chips">
           <div class="chip ok" id="chip-ok">✓ 0</div>
           <div class="chip warn" id="chip-warn">⚠ 0</div>
@@ -136,6 +137,9 @@
           <button class="sug-btn skip" onclick="dismissSuggestion('scanner')">Dismiss</button>
         </div>
         <div class="sug-disclaimer">Disclaimer: AI suggestions are for reference only. Verify with legal professionals before making changes.</div>
+      </div>
+      <div class="report-disclaimer" style="font-size: 11px; color: var(--text3); padding: 12px 15px; text-align: center; border-top: 1px solid var(--border); line-height: 1.4; background: var(--surface2);">
+        Disclaimer: This compliance report is AI-generated for reference only. Verify with legal professionals before finalizing changes.
       </div>
 
     </div>
@@ -264,6 +268,9 @@
           <button class="sug-btn skip" onclick="dismissSuggestion('history')">Dismiss</button>
         </div>
         <div class="sug-disclaimer">Disclaimer: AI suggestions are for reference only. Verify with legal professionals before making changes.</div>
+      </div>
+      <div class="report-disclaimer" style="font-size: 11px; color: var(--text3); padding: 12px 15px; text-align: center; border-top: 1px solid var(--border); line-height: 1.4; background: var(--surface2);">
+        Disclaimer: This compliance report is AI-generated for reference only. Verify with legal professionals before finalizing changes.
       </div>
 
     </div>
