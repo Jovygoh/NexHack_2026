@@ -2,7 +2,6 @@
 > **Official Submission Assets**  
 > 🚀 **[Live Demo (Vercel Website)](https://nex-hack-2026.vercel.app/)**  
 > 📂 **[Read the Pitch Deck (PDF)](./pitch_deck.pdf)**  
-> 📺 **[Launch Interactive Presentation Slides](./presentation_slides.html)** | **[Flip-Book Link](https://heyzine.com/flip-book/b9c4379e07.html#page/8)**  
 > 
 > *Empowering Malaysian SMEs, HR professionals, and Legal teams to screen, flag, and remediate contract compliance risks in under 30 seconds.*
 
