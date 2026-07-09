@@ -875,17 +875,12 @@ async function loadScanHistory(isSilent = false, searchQuery = '') {
   if (btn && !isSilent) btn.textContent = '🔄 Syncing...';
   
   try {
-    let url = `${API_BASE}/api/history`;
-    if (searchQuery) {
-      url += `?search=${encodeURIComponent(searchQuery)}`;
-    }
+    const url = `${API_BASE}/api/history`;
     const res = await fetch(url);
     if (res.ok) {
       const dbHistory = await res.json();
       if (dbHistory && dbHistory.length > 0) {
         SCAN_HISTORY = dbHistory;
-      } else if (searchQuery) {
-        SCAN_HISTORY = [];
       } else {
         SCAN_HISTORY = loadLocalScanHistory();
       }
@@ -911,7 +906,7 @@ function onHistorySearch() {
   _historySearchTimeout = setTimeout(async () => {
     const query = document.getElementById('history-search-input').value.trim();
     _activeHistorySearch = query;
-    await loadScanHistory(false, query);
+    buildHistoryList();
   }, 300);
 }
 
@@ -1059,14 +1054,26 @@ function getHistoryStatus(contract) {
 
 function matchesHistorySearch(contract, query) {
   if (!query) return true;
-  const needle = query.toLowerCase();
-  return [
+  const queryTokens = normaliseHistorySearchText(query).split(' ').filter(Boolean);
+  if (!queryTokens.length) return true;
+  const visibleHaystack = normaliseHistorySearchText([
     contract.filename,
     contract.company,
-    contract.summary,
-    contract.rawText,
-    contract.contract_text,
-  ].some(value => String(value || '').toLowerCase().includes(needle));
+    contract.date,
+    contract.time,
+    getHistoryStatus(contract),
+  ].filter(Boolean).join(' '));
+  return queryTokens.every(token => visibleHaystack.includes(token));
+}
+
+function normaliseHistorySearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_\-]+/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getFilteredHistoryRows() {
@@ -2113,17 +2120,38 @@ function applyAllSuggestions() {
   });
   
   _editorIssues = missed;
+  _editorWizardIndex = 0;
   if (count > 0) {
     const paper = document.getElementById('editor-textarea');
     const firstApplied = paper.querySelector('[data-auto-applied="true"]');
     firstApplied?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
+
+  if (missed.length) {
+    const manualHeader = document.createElement('div');
+    manualHeader.className = 'applied-item manual-review-needed';
+    manualHeader.innerHTML = `
+      <div class="applied-item-top">Manual review needed</div>
+      <div class="applied-item-desc">${missed.length} issue(s) could not be auto-matched in the edited text. Review them one by one below.</div>
+      <button class="manual-review-btn" onclick="setEditMode('manual')">Review these now</button>
+    `;
+    listEl.appendChild(manualHeader);
+
+    missed.forEach(issue => {
+      const manualItem = document.createElement('div');
+      manualItem.className = 'applied-item manual-review-needed';
+      manualItem.innerHTML = `
+        <div class="applied-item-top">${issue.title}</div>
+        <div class="applied-item-desc"><strong>Original issue clause:</strong><br>${escapeHtml(issue.originalText || '').slice(0, 240)}</div>
+      `;
+      listEl.appendChild(manualItem);
+    });
+  }
+
   updateWizardUI();
-  alert(
-    missed.length
-      ? `Auto-applied ${count} suggestion(s). ${missed.length} issue(s) need manual review.`
-      : `Successfully auto-applied ${count} suggestion(s) to the contract.`
-  );
+  if (!missed.length) {
+    alert(`Successfully auto-applied ${count} suggestion(s) to the contract.`);
+  }
 }
 
 async function saveEditorChanges() {

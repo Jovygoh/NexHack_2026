@@ -800,6 +800,29 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
 .applied-item-desc {
   color: var(--text2);
 }
+.applied-item.manual-review-needed {
+  border-color: rgba(255, 193, 7, 0.45);
+  background: rgba(255, 193, 7, 0.08);
+}
+.applied-item.manual-review-needed .applied-item-top {
+  color: var(--amber);
+}
+.manual-review-btn {
+  margin-top: 10px;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: rgba(79,142,247,0.14);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.manual-review-btn:hover {
+  background: rgba(79,142,247,0.22);
+}
 
 /* Wizard */
 .review-wizard {
