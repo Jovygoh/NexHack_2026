@@ -127,6 +127,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 4
 .contract-page .doc-meta{text-align:center;font-size:10pt;color:#333;margin-bottom:12px;line-height:1.6}
 .contract-page .sec-title{font-weight:bold;font-size:11pt;margin-top:18px;margin-bottom:4px}
 .contract-page .clause-line{margin-bottom:4px;padding:3px 0}
+.contract-page .clause-line.located-clause{outline:2px solid var(--accent);border-radius:4px;background:rgba(79,142,247,0.08)}
 
 /* highlight spans */
 .hl-red{background:#ffe0e0;border-bottom:2px solid #d9222280;cursor:pointer;border-radius:2px;padding:1px 0}
