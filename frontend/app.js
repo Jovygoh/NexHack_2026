@@ -199,8 +199,6 @@ function onIssueClick(el, issueListElId) {
   const contract  = _activeContract;
   if (!contract || !findingId) return;
 
-  const isCurrentlyActive = el.classList.contains('active');
-
   // Close all other issue items in the list
   const issueList = document.getElementById(issueListElId);
   issueList.querySelectorAll('.issue-item').forEach(i => {
@@ -211,18 +209,13 @@ function onIssueClick(el, issueListElId) {
     if (shortDesc) shortDesc.style.display = 'block';
   });
 
-  if (!isCurrentlyActive) {
-    el.classList.add('active');
-    const details = el.querySelector('.issue-details');
-    if (details) details.style.display = 'flex';
-    const shortDesc = el.querySelector('.issue-desc-short');
-    if (shortDesc) shortDesc.style.display = 'none';
+  el.classList.add('active');
+  const details = el.querySelector('.issue-details');
+  if (details) details.style.display = 'flex';
+  const shortDesc = el.querySelector('.issue-desc-short');
+  if (shortDesc) shortDesc.style.display = 'none';
 
-    // Scroll + activate the highlight on the real PDF
-    if (contract._pdfViewerHandle) {
-      contract._pdfViewerHandle.scrollToFinding(findingId);
-    }
-  }
+  scrollContractToFinding(findingId, contract);
 }
 
 // Activate a finding by ID from a PDF highlight click (bottom-up: PDF → sidebar).
@@ -239,6 +232,67 @@ function activateFindingById(findingId, contract, issueListEl, suggestionTextEl,
   }
 }
 
+function scrollContractToFinding(findingId, contract = _activeContract) {
+  if (!findingId || !contract) return;
+
+  if (contract._pdfViewerHandle) {
+    contract._pdfViewerHandle.scrollToFinding(findingId);
+  } else if (contract.pdfBase64) {
+    contract._pendingScrollFindingId = findingId;
+  }
+
+  const clause = findClauseByFindingId(findingId, contract);
+  if (!clause) return;
+
+  const activeTextContainers = ['contract-page-content', 'history-page-content']
+    .map(id => document.getElementById(id))
+    .filter(el => el && el.style.display !== 'none');
+
+  for (const container of activeTextContainers) {
+    const clauseEl = findClauseElement(container, clause);
+    if (clauseEl) {
+      highlightAndScrollClause(container, clauseEl);
+      return;
+    }
+  }
+}
+
+function findClauseByFindingId(findingId, contract) {
+  const clauses = (contract.sections || []).flatMap(section => section.clauses || []);
+  return clauses.find(clause => clause.findingId === findingId || clause.id === findingId) || null;
+}
+
+function findClauseElement(container, clause) {
+  const candidateIds = [
+    clause.id,
+    clause.findingId,
+    String(clause.id || '').replace(/[^0-9.]/g, ''),
+  ].filter(Boolean);
+
+  for (const id of candidateIds) {
+    const safeDotId = id.replace(/\./g, '_');
+    const safeAnyId = id.replace(/[^a-zA-Z0-9]/g, '_');
+    const el = document.getElementById(`${container.id}-clause-${safeDotId}`)
+      || document.getElementById(`${container.id}-clause-${safeAnyId}`);
+    if (el) return el;
+  }
+
+  const targetText = normaliseEditorText(clause.text || clause.originalText || '');
+  if (!targetText) return null;
+  return Array.from(container.querySelectorAll('.clause-line')).find(el => {
+    const text = normaliseEditorText(el.textContent || '');
+    return text.includes(targetText.slice(0, 80)) || targetText.includes(text.slice(0, 80));
+  }) || null;
+}
+
+function highlightAndScrollClause(container, clauseEl) {
+  container.querySelectorAll('.clause-line.located-clause').forEach(el => {
+    el.classList.remove('located-clause');
+  });
+  clauseEl.classList.add('located-clause');
+  clauseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, copyBtnId) {
   // Search active contract (scanner or history)
   const allClauses = _activeContract
@@ -253,9 +307,7 @@ function pickIssue(clauseId, containerElId, issueListElId, suggestionTextElId, c
   const safeId   = clauseId.replace(/\./g, '_');
   const clauseEl = document.getElementById(`${containerElId}-clause-${safeId}`);
   if (clauseEl) {
-    clauseEl.style.outline      = '2px solid var(--accent)';
-    clauseEl.style.borderRadius = '3px';
-    clauseEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightAndScrollClause(container, clauseEl);
   }
 
   // Highlight and expand in issue list
@@ -1028,6 +1080,10 @@ function showResults(contract) {
       contract.highlightBoxes,
     ).then(handle => {
       contract._pdfViewerHandle = handle;
+      if (contract._pendingScrollFindingId) {
+        handle.scrollToFinding(contract._pendingScrollFindingId);
+        contract._pendingScrollFindingId = null;
+      }
       window.onPdfHighlightClick = (findingId) => {
         activateFindingById(findingId, contract,
           document.getElementById('issues-list'),
@@ -1620,6 +1676,10 @@ async function openHistoryDetail(id) {
       contract.highlightBoxes,
     ).then(handle => {
       contract._pdfViewerHandle = handle;
+      if (contract._pendingScrollFindingId) {
+        handle.scrollToFinding(contract._pendingScrollFindingId);
+        contract._pendingScrollFindingId = null;
+      }
       window.onPdfHighlightClick = (findingId) => {
         activateFindingById(findingId, contract,
           document.getElementById('history-issues-list'),
